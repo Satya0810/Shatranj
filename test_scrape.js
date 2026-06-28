@@ -1,0 +1,1 @@
+fetch('https://lichess.org/training/fork').then(r=>r.text()).then(t=>{ const match = t.match(/&quot;puzzle&quot;:\{&quot;id&quot;:&quot;([a-zA-Z0-9]+)&quot;/); console.log(match ? match[1] : 'not found'); })

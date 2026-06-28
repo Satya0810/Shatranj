@@ -1,0 +1,365 @@
+import { createServer } from 'http';
+import { parse } from 'url';
+import next from 'next';
+import { Server } from 'socket.io';
+import { Chess } from 'chess.js';
+
+const dev = process.env.NODE_ENV !== 'production';
+const app = next({ dev });
+const handle = app.getRequestHandler();
+
+const PORT = process.env.PORT || 3000;
+
+// In-memory lobby and game state
+const lobby = []; // { socketId, userId, username, rating }
+const activeGames = new Map(); // gameId -> { chess, white, black, timeControl, whiteTime, blackTime, lastMoveTime, timerInterval }
+
+async function saveGameResult(gameId, game, result, reason, winner) {
+  if (!game.white.userId || !game.black.userId) return;
+
+  try {
+    const { default: connectDB } = await import('./app/lib/mongodb.js');
+    const { default: User } = await import('./app/models/User.js');
+    const { default: Game } = await import('./app/models/Game.js');
+    
+    await connectDB();
+    
+    // Create Game record
+    await Game.create({
+      whitePlayer: game.white.userId,
+      blackPlayer: game.black.userId,
+      pgn: game.chess.pgn(),
+      result,
+      resultReason: reason,
+      timeControl: game.timeControl,
+      endedAt: new Date(),
+    });
+
+    // Update Users
+    const whiteUser = await User.findById(game.white.userId);
+    const blackUser = await User.findById(game.black.userId);
+
+    if (whiteUser && blackUser) {
+      whiteUser.gamesPlayed += 1;
+      blackUser.gamesPlayed += 1;
+
+      // Simple ELO calculation
+      const kFactor = 32;
+      const expectedWhite = 1 / (1 + Math.pow(10, (blackUser.rating - whiteUser.rating) / 400));
+      const expectedBlack = 1 / (1 + Math.pow(10, (whiteUser.rating - blackUser.rating) / 400));
+
+      let whiteScore = 0.5;
+      let blackScore = 0.5;
+
+      if (winner === 'white') {
+        whiteScore = 1;
+        blackScore = 0;
+        whiteUser.wins += 1;
+        blackUser.losses += 1;
+      } else if (winner === 'black') {
+        whiteScore = 0;
+        blackScore = 1;
+        whiteUser.losses += 1;
+        blackUser.wins += 1;
+      } else {
+        whiteUser.draws += 1;
+        blackUser.draws += 1;
+      }
+
+      const newWhiteRating = Math.max(100, Math.round(whiteUser.rating + kFactor * (whiteScore - expectedWhite)));
+      const newBlackRating = Math.max(100, Math.round(blackUser.rating + kFactor * (blackScore - expectedBlack)));
+
+      whiteUser.rating = newWhiteRating;
+      blackUser.rating = newBlackRating;
+
+      await whiteUser.save();
+      await blackUser.save();
+    }
+  } catch (error) {
+    console.error('Error saving game result:', error);
+  }
+}
+
+app.prepare().then(() => {
+  const server = createServer((req, res) => {
+    const parsedUrl = parse(req.url, true);
+    handle(req, res, parsedUrl);
+  });
+
+  const io = new Server(server, {
+    path: '/api/socketio',
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST'],
+    },
+  });
+
+  io.on('connection', (socket) => {
+    console.log(`Player connected: ${socket.id}`);
+
+    // Join matchmaking lobby
+    socket.on('join-lobby', (data) => {
+      const { userId, username, rating, timeControl } = data;
+      
+      // Remove if already in lobby
+      const existingIndex = lobby.findIndex(p => p.userId === userId);
+      if (existingIndex !== -1) lobby.splice(existingIndex, 1);
+
+      // Check if there's someone waiting
+      const opponent = lobby.find(p => p.userId !== userId);
+
+      if (opponent) {
+        // Match found! Remove opponent from lobby
+        lobby.splice(lobby.indexOf(opponent), 1);
+
+        // Randomly assign colors
+        const isWhite = Math.random() > 0.5;
+        const white = isWhite ? { ...data, socketId: socket.id } : opponent;
+        const black = isWhite ? opponent : { ...data, socketId: socket.id };
+
+        const gameId = `game_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const chess = new Chess();
+        const tc = timeControl || { minutes: 10, increment: 0 };
+        const initialTime = tc.minutes * 60 * 1000; // in ms
+
+        activeGames.set(gameId, {
+          chess,
+          white,
+          black,
+          timeControl: tc,
+          whiteTime: initialTime,
+          blackTime: initialTime,
+          lastMoveTime: Date.now(),
+          timerInterval: null,
+        });
+
+        // Notify both players
+        const gameData = {
+          gameId,
+          timeControl: tc,
+          whiteTime: initialTime,
+          blackTime: initialTime,
+        };
+
+        io.to(white.socketId).emit('game-start', {
+          ...gameData,
+          color: 'white',
+          opponent: { username: black.username, rating: black.rating, userId: black.userId },
+        });
+
+        io.to(black.socketId).emit('game-start', {
+          ...gameData,
+          color: 'black',
+          opponent: { username: white.username, rating: white.rating, userId: white.userId },
+        });
+
+        // Join both to a game room
+        const whiteSocket = io.sockets.sockets.get(white.socketId);
+        const blackSocket = io.sockets.sockets.get(black.socketId);
+        if (whiteSocket) whiteSocket.join(gameId);
+        if (blackSocket) blackSocket.join(gameId);
+
+        console.log(`Game ${gameId} started: ${white.username} (W) vs ${black.username} (B)`);
+      } else {
+        // No opponent found, add to lobby
+        lobby.push({ ...data, socketId: socket.id });
+        socket.emit('waiting', { position: lobby.length });
+        console.log(`${username} joined lobby. Queue size: ${lobby.length}`);
+      }
+    });
+
+    // Leave lobby
+    socket.on('leave-lobby', (data) => {
+      const idx = lobby.findIndex(p => p.socketId === socket.id);
+      if (idx !== -1) lobby.splice(idx, 1);
+    });
+
+    // Handle a move
+    socket.on('move', (data) => {
+      const { gameId, move } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+
+      const { chess, white, black } = game;
+      
+      // Verify it's the correct player's turn
+      const isWhiteTurn = chess.turn() === 'w';
+      const isWhitePlayer = socket.id === white.socketId;
+      if (isWhiteTurn !== isWhitePlayer) return;
+
+      // Update clock
+      const now = Date.now();
+      const elapsed = now - game.lastMoveTime;
+      const tc = game.timeControl;
+
+      if (isWhiteTurn) {
+        game.whiteTime -= elapsed;
+        if (tc.increment) game.whiteTime += tc.increment * 1000;
+      } else {
+        game.blackTime -= elapsed;
+        if (tc.increment) game.blackTime += tc.increment * 1000;
+      }
+      game.lastMoveTime = now;
+
+      // Check for flag
+      if (game.whiteTime <= 0) {
+        saveGameResult(gameId, game, '0-1', 'timeout', 'black');
+        io.to(gameId).emit('game-over', {
+          result: '0-1',
+          reason: 'timeout',
+          winner: 'black',
+          whiteTime: 0,
+          blackTime: game.blackTime,
+        });
+        activeGames.delete(gameId);
+        return;
+      }
+      if (game.blackTime <= 0) {
+        saveGameResult(gameId, game, '1-0', 'timeout', 'white');
+        io.to(gameId).emit('game-over', {
+          result: '1-0',
+          reason: 'timeout',
+          winner: 'white',
+          whiteTime: game.whiteTime,
+          blackTime: 0,
+        });
+        activeGames.delete(gameId);
+        return;
+      }
+
+      // Apply the move
+      try {
+        chess.move(move);
+      } catch (e) {
+        socket.emit('invalid-move', { message: 'Invalid move' });
+        return;
+      }
+
+      // Broadcast move to opponent
+      io.to(gameId).emit('move-made', {
+        move,
+        fen: chess.fen(),
+        whiteTime: game.whiteTime,
+        blackTime: game.blackTime,
+      });
+
+      // Check game end conditions
+      if (chess.isCheckmate()) {
+        const winner = chess.turn() === 'w' ? 'black' : 'white';
+        saveGameResult(gameId, game, winner === 'white' ? '1-0' : '0-1', 'checkmate', winner);
+        io.to(gameId).emit('game-over', {
+          result: winner === 'white' ? '1-0' : '0-1',
+          reason: 'checkmate',
+          winner,
+          whiteTime: game.whiteTime,
+          blackTime: game.blackTime,
+        });
+        activeGames.delete(gameId);
+      } else if (chess.isDraw() || chess.isStalemate() || chess.isThreefoldRepetition() || chess.isInsufficientMaterial()) {
+        saveGameResult(gameId, game, '1/2-1/2', chess.isStalemate() ? 'stalemate' : 'draw', null);
+        io.to(gameId).emit('game-over', {
+          result: '1/2-1/2',
+          reason: chess.isStalemate() ? 'stalemate' : 'draw',
+          winner: null,
+          whiteTime: game.whiteTime,
+          blackTime: game.blackTime,
+        });
+        activeGames.delete(gameId);
+      }
+    });
+
+    // Resign
+    socket.on('resign', (data) => {
+      const { gameId } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+
+      const isWhite = socket.id === game.white.socketId;
+      const winner = isWhite ? 'black' : 'white';
+
+      saveGameResult(gameId, game, winner === 'white' ? '1-0' : '0-1', 'resignation', winner);
+
+      io.to(gameId).emit('game-over', {
+        result: winner === 'white' ? '1-0' : '0-1',
+        reason: 'resignation',
+        winner,
+        whiteTime: game.whiteTime,
+        blackTime: game.blackTime,
+      });
+      activeGames.delete(gameId);
+    });
+
+    // Draw offer
+    socket.on('offer-draw', (data) => {
+      const { gameId } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+
+      const opponentSocketId = socket.id === game.white.socketId
+        ? game.black.socketId
+        : game.white.socketId;
+
+      io.to(opponentSocketId).emit('draw-offered');
+    });
+
+    socket.on('accept-draw', (data) => {
+      const { gameId } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+
+      saveGameResult(gameId, game, '1/2-1/2', 'agreement', null);
+
+      io.to(gameId).emit('game-over', {
+        result: '1/2-1/2',
+        reason: 'agreement',
+        winner: null,
+        whiteTime: game.whiteTime,
+        blackTime: game.blackTime,
+      });
+      activeGames.delete(gameId);
+    });
+
+    socket.on('decline-draw', (data) => {
+      const { gameId } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+
+      const opponentSocketId = socket.id === game.white.socketId
+        ? game.black.socketId
+        : game.white.socketId;
+
+      io.to(opponentSocketId).emit('draw-declined');
+    });
+
+    // Disconnect
+    socket.on('disconnect', () => {
+      console.log(`Player disconnected: ${socket.id}`);
+      
+      // Remove from lobby
+      const lobbyIdx = lobby.findIndex(p => p.socketId === socket.id);
+      if (lobbyIdx !== -1) lobby.splice(lobbyIdx, 1);
+
+      // Check if player was in an active game
+      for (const [gameId, game] of activeGames.entries()) {
+        if (socket.id === game.white.socketId || socket.id === game.black.socketId) {
+          const isWhite = socket.id === game.white.socketId;
+          const winner = isWhite ? 'black' : 'white';
+
+          io.to(gameId).emit('game-over', {
+            result: winner === 'white' ? '1-0' : '0-1',
+            reason: 'disconnect',
+            winner,
+            whiteTime: game.whiteTime,
+            blackTime: game.blackTime,
+          });
+          activeGames.delete(gameId);
+          break;
+        }
+      }
+    });
+  });
+
+  server.listen(PORT, () => {
+    console.log(`> ChessMaster server ready on http://localhost:${PORT}`);
+  });
+});
