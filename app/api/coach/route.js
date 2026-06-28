@@ -176,7 +176,7 @@ export async function POST(req) {
     }
 
     // Now, call the free LLM API (OpenRouter)
-    const OPENROUTER_API_KEY = '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';
+    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
     
     let llmResponse;
     let retries = 3;
