@@ -3,6 +3,8 @@ import connectDB from '../../../lib/mongodb';
 import User from '../../../models/User';
 import Game from '../../../models/Game';
 import PuzzleRecord from '../../../models/PuzzleRecord';
+import { fetchLichessUser, fetchLichessGames } from '../../../lib/lichessDatabase';
+import { fetchChesscomUser, fetchChesscomStats, fetchChesscomGames } from '../../../lib/chesscomDatabase';
 
 export async function GET(req, { params }) {
   try {
@@ -31,7 +33,33 @@ export async function GET(req, { params }) {
       draws: user.draws,
       avatar: user.avatar,
       createdAt: user.createdAt,
+      lichessUsername: user.lichessUsername,
+      chesscomUsername: user.chesscomUsername,
     };
+
+    if (user.lichessUsername) {
+      try {
+        const lichessProfile = await fetchLichessUser(user.lichessUsername);
+        const lichessRecentGames = await fetchLichessGames(user.lichessUsername, 5);
+        publicProfile.lichessProfile = lichessProfile;
+        publicProfile.lichessRecentGames = lichessRecentGames;
+      } catch (err) {
+        console.error('Failed to fetch Lichess data for profile:', err);
+      }
+    }
+
+    if (user.chesscomUsername) {
+      try {
+        const chesscomProfile = await fetchChesscomUser(user.chesscomUsername);
+        const chesscomStats = await fetchChesscomStats(user.chesscomUsername);
+        const chesscomRecentGames = await fetchChesscomGames(user.chesscomUsername, 5);
+        publicProfile.chesscomProfile = chesscomProfile;
+        publicProfile.chesscomStats = chesscomStats;
+        publicProfile.chesscomRecentGames = chesscomRecentGames;
+      } catch (err) {
+        console.error('Failed to fetch Chess.com data for profile:', err);
+      }
+    }
 
     // Fetch recent games
     const recentGames = await Game.find({

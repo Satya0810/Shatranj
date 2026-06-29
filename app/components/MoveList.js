@@ -40,14 +40,16 @@ export default function MoveList({
 
   const getClassificationSymbol = (c) => {
     switch (c) {
-      case 'brilliant': return <span style={{marginLeft: '4px'}} title="Brilliant">💎</span>;
-      case 'great': return <span style={{marginLeft: '4px'}} title="Great">🌟</span>;
-      case 'best': return <span style={{marginLeft: '4px'}} title="Best">⭐</span>;
-      case 'book': return <span style={{marginLeft: '4px'}} title="Book">📘</span>;
-      case 'good': return <span style={{marginLeft: '4px'}} title="Good">👍</span>;
-      case 'inaccuracy': return <span style={{marginLeft: '4px'}} title="Inaccuracy">?!</span>;
-      case 'mistake': return <span style={{marginLeft: '4px'}} title="Mistake">?</span>;
-      case 'blunder': return <span style={{marginLeft: '4px'}} title="Blunder">??</span>;
+      case 'brilliant': return <span style={{marginLeft: '4px', color: '#1baca6', fontWeight: 800}} title="Brilliant">!!</span>;
+      case 'great': return <span style={{marginLeft: '4px', color: '#5c8bb0', fontWeight: 800}} title="Great">!</span>;
+      case 'best': return <span style={{marginLeft: '4px', color: '#81b64a'}} title="Best">★</span>;
+      case 'excellent': return <span style={{marginLeft: '4px', color: '#96bc4b'}} title="Excellent">👍</span>;
+      case 'book': return <span style={{marginLeft: '4px', color: '#d5a47d'}} title="Book">📖</span>;
+      case 'good': return <span style={{marginLeft: '4px', color: '#96bc4b'}} title="Good">✅</span>;
+      case 'inaccuracy': return <span style={{marginLeft: '4px', color: '#f3ae16', fontWeight: 800}} title="Inaccuracy">?!</span>;
+      case 'mistake': return <span style={{marginLeft: '4px', color: '#e58f2a', fontWeight: 800}} title="Mistake">?</span>;
+      case 'miss': return <span style={{marginLeft: '4px', color: '#ff7769', fontWeight: 800}} title="Miss">❌</span>;
+      case 'blunder': return <span style={{marginLeft: '4px', color: '#ca3431', fontWeight: 800}} title="Blunder">??</span>;
       default: return null;
     }
   };

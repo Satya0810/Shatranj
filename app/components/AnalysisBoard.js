@@ -9,6 +9,7 @@ import EvaluationBar from './EvaluationBar';
 import StockfishEngine from '../lib/stockfish';
 import { evaluateHeuristic, evaluateDetailed } from '../lib/heuristic';
 import { fetchLichessCloudEval, uciToDisplay } from '../lib/lichess';
+import { fetchLichessGamePgn } from '../lib/lichessDatabase';
 import CoachFeedback from './CoachFeedback';
 import EvaluationChart from './EvaluationChart';
 
@@ -319,22 +320,28 @@ export default function AnalysisBoard() {
           const wAfter = 50 + 50 * (2 / Math.PI) * Math.atan(eAfter / 290);
           const loss = Math.max(0, wBefore - wAfter);
 
-          if (i <= 10 && evalDrop < 50) { // First 5 full moves
+          if (i <= 10 && evalDrop < 50) {
             classifications[i] = 'book';
-          } else if (loss >= 20) {
-            classifications[i] = 'blunder';
-          } else if (loss >= 10) {
-            classifications[i] = 'mistake';
-          } else if (loss >= 5) {
-            classifications[i] = 'inaccuracy';
           } else if (evalDrop <= -150) {
             classifications[i] = 'brilliant';
           } else if (evalDrop <= -75) {
             classifications[i] = 'great';
-          } else if (loss < 1.5) {
-            classifications[i] = 'best';
-          } else {
+          } else if (loss >= 20) {
+            if (wBefore > 70 && wAfter >= 40) {
+              classifications[i] = 'miss';
+            } else {
+              classifications[i] = 'blunder';
+            }
+          } else if (loss >= 15) {
+            classifications[i] = 'mistake';
+          } else if (loss >= 10) {
+            classifications[i] = 'inaccuracy';
+          } else if (loss >= 5) {
             classifications[i] = 'good';
+          } else if (loss >= 2) {
+            classifications[i] = 'excellent';
+          } else {
+            classifications[i] = 'best';
           }
           
           resolve();
@@ -350,7 +357,7 @@ export default function AnalysisBoard() {
     setAnalysisRunning(false);
 
     // Calculate accuracies and counts for the AI coach
-    const categories = ['brilliant', 'great', 'best', 'book', 'good', 'inaccuracy', 'mistake', 'blunder'];
+    const categories = ['brilliant', 'great', 'best', 'excellent', 'good', 'book', 'inaccuracy', 'mistake', 'miss', 'blunder'];
     const counts = Object.fromEntries(categories.map(c => [c, 0]));
     Object.values(classifications).forEach(c => {
       if (counts[c] !== undefined) counts[c]++;
@@ -402,13 +409,31 @@ export default function AnalysisBoard() {
   useEffect(() => {
     const pgnParam = searchParams.get('pgn');
     const autoAnalyzeParam = searchParams.get('autoAnalyze');
+    const lichessGameId = searchParams.get('lichessGameId');
+    const orientationParam = searchParams.get('orientation');
+
+    if (orientationParam && (orientationParam === 'white' || orientationParam === 'black')) {
+      setOrientation(orientationParam);
+    }
+
     if (pgnParam) {
-      const decodedPgn = decodeURIComponent(pgnParam);
-      setPgnInput(decodedPgn);
-      loadPgn(decodedPgn);
+      setPgnInput(pgnParam);
+      loadPgn(pgnParam);
       if (autoAnalyzeParam === 'true') {
         setShouldAutoAnalyze(true);
       }
+    } else if (lichessGameId) {
+      fetchLichessGamePgn(lichessGameId)
+        .then(pgnText => {
+          setPgnInput(pgnText);
+          loadPgn(pgnText);
+          if (autoAnalyzeParam === 'true') {
+            setShouldAutoAnalyze(true);
+          }
+        })
+        .catch(err => {
+          console.error("Failed to fetch Lichess game:", err);
+        });
     }
   }, [searchParams, loadPgn]);
 
@@ -788,7 +813,7 @@ export default function AnalysisBoard() {
             </div>
             <div className="card-body">
               {(() => {
-                const categories = ['brilliant', 'great', 'best', 'book', 'good', 'inaccuracy', 'mistake', 'blunder'];
+                const categories = ['brilliant', 'great', 'best', 'excellent', 'good', 'book', 'inaccuracy', 'mistake', 'miss', 'blunder'];
                 const counts = Object.fromEntries(categories.map(c => [c, 0]));
                 const whiteCounts = Object.fromEntries(categories.map(c => [c, 0]));
                 const blackCounts = Object.fromEntries(categories.map(c => [c, 0]));
@@ -901,52 +926,64 @@ export default function AnalysisBoard() {
                       </thead>
                       <tbody>
                         <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '6px 0' }}>💎 Brilliant</td>
-                          <td style={getRowStyle('var(--accent-blue)')}>{whiteCounts.brilliant}</td>
-                          <td style={getRowStyle('var(--accent-blue)')}>{blackCounts.brilliant}</td>
-                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{counts.brilliant}</td>
+                          <td style={{ padding: '6px 0', color: '#1baca6', fontWeight: 600 }}>!! Brilliant</td>
+                          <td style={getRowStyle('#1baca6')}>{whiteCounts.brilliant}</td>
+                          <td style={getRowStyle('#1baca6')}>{blackCounts.brilliant}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#1baca6' }}>{counts.brilliant}</td>
                         </tr>
                         <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '6px 0' }}>🌟 Great</td>
-                          <td style={getRowStyle('var(--accent-blue)')}>{whiteCounts.great}</td>
-                          <td style={getRowStyle('var(--accent-blue)')}>{blackCounts.great}</td>
-                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{counts.great}</td>
+                          <td style={{ padding: '6px 0', color: '#5c8bb0', fontWeight: 600 }}>! Great</td>
+                          <td style={getRowStyle('#5c8bb0')}>{whiteCounts.great}</td>
+                          <td style={getRowStyle('#5c8bb0')}>{blackCounts.great}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#5c8bb0' }}>{counts.great}</td>
                         </tr>
                         <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '6px 0' }}>⭐ Best</td>
-                          <td style={getRowStyle('var(--accent-green)')}>{whiteCounts.best}</td>
-                          <td style={getRowStyle('var(--accent-green)')}>{blackCounts.best}</td>
-                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{counts.best}</td>
+                          <td style={{ padding: '6px 0', color: '#81b64a', fontWeight: 600 }}>★ Best</td>
+                          <td style={getRowStyle('#81b64a')}>{whiteCounts.best}</td>
+                          <td style={getRowStyle('#81b64a')}>{blackCounts.best}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#81b64a' }}>{counts.best}</td>
                         </tr>
                         <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '6px 0' }}>📘 Book</td>
-                          <td style={getRowStyle('var(--accent-primary)')}>{whiteCounts.book}</td>
-                          <td style={getRowStyle('var(--accent-primary)')}>{blackCounts.book}</td>
-                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{counts.book}</td>
+                          <td style={{ padding: '6px 0', color: '#96bc4b', fontWeight: 600 }}>👍 Excellent</td>
+                          <td style={getRowStyle('#96bc4b')}>{whiteCounts.excellent}</td>
+                          <td style={getRowStyle('#96bc4b')}>{blackCounts.excellent}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#96bc4b' }}>{counts.excellent}</td>
                         </tr>
                         <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '6px 0' }}>👍 Good</td>
-                          <td style={getRowStyle('var(--accent-green)')}>{whiteCounts.good}</td>
-                          <td style={getRowStyle('var(--accent-green)')}>{blackCounts.good}</td>
-                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{counts.good}</td>
+                          <td style={{ padding: '6px 0', color: '#96bc4b', fontWeight: 600 }}>✅ Good</td>
+                          <td style={getRowStyle('#96bc4b')}>{whiteCounts.good}</td>
+                          <td style={getRowStyle('#96bc4b')}>{blackCounts.good}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#96bc4b' }}>{counts.good}</td>
                         </tr>
                         <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '6px 0' }}>🤔 Inaccuracy</td>
-                          <td style={getRowStyle('var(--accent-gold)')}>{whiteCounts.inaccuracy}</td>
-                          <td style={getRowStyle('var(--accent-gold)')}>{blackCounts.inaccuracy}</td>
-                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{counts.inaccuracy}</td>
+                          <td style={{ padding: '6px 0', color: '#d5a47d', fontWeight: 600 }}>📖 Book</td>
+                          <td style={getRowStyle('#d5a47d')}>{whiteCounts.book}</td>
+                          <td style={getRowStyle('#d5a47d')}>{blackCounts.book}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#d5a47d' }}>{counts.book}</td>
                         </tr>
                         <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '6px 0' }}>⚠️ Mistake</td>
-                          <td style={getRowStyle('var(--accent-gold)')}>{whiteCounts.mistake}</td>
-                          <td style={getRowStyle('var(--accent-gold)')}>{blackCounts.mistake}</td>
-                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{counts.mistake}</td>
+                          <td style={{ padding: '6px 0', color: '#f3ae16', fontWeight: 600 }}>?! Inaccuracy</td>
+                          <td style={getRowStyle('#f3ae16')}>{whiteCounts.inaccuracy}</td>
+                          <td style={getRowStyle('#f3ae16')}>{blackCounts.inaccuracy}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#f3ae16' }}>{counts.inaccuracy}</td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '6px 0', color: '#e58f2a', fontWeight: 600 }}>? Mistake</td>
+                          <td style={getRowStyle('#e58f2a')}>{whiteCounts.mistake}</td>
+                          <td style={getRowStyle('#e58f2a')}>{blackCounts.mistake}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#e58f2a' }}>{counts.mistake}</td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                          <td style={{ padding: '6px 0', color: '#ff7769', fontWeight: 600 }}>❌ Miss</td>
+                          <td style={getRowStyle('#ff7769')}>{whiteCounts.miss}</td>
+                          <td style={getRowStyle('#ff7769')}>{blackCounts.miss}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#ff7769' }}>{counts.miss}</td>
                         </tr>
                         <tr>
-                          <td style={{ padding: '6px 0' }}>❌ Blunder</td>
-                          <td style={getRowStyle('var(--accent-red)')}>{whiteCounts.blunder}</td>
-                          <td style={getRowStyle('var(--accent-red)')}>{blackCounts.blunder}</td>
-                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700 }}>{counts.blunder}</td>
+                          <td style={{ padding: '6px 0', color: '#ca3431', fontWeight: 600 }}>?? Blunder</td>
+                          <td style={getRowStyle('#ca3431')}>{whiteCounts.blunder}</td>
+                          <td style={getRowStyle('#ca3431')}>{blackCounts.blunder}</td>
+                          <td style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#ca3431' }}>{counts.blunder}</td>
                         </tr>
                       </tbody>
                     </table>

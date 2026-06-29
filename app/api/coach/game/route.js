@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 const GAME_SUMMARY_PROMPT = `You are an expert chess coach. The user has just finished a game of chess and run a full engine analysis. 
-You will receive the game PGN, the accuracies of both players, and a classification of mistakes/blunders made by both sides.
+You will receive the game PGN, the accuracies of both players, and a classification of move qualities (best, excellent, good, inaccuracy, mistake, blunder, miss, etc.).
 Your job is to provide an encouraging, insightful, and concise post-game summary (2-3 paragraphs).
 
 Respond ONLY with a valid JSON object in this exact structure. No markdown, no preamble:

@@ -10,6 +10,14 @@ const UserSchema = new mongoose.Schema({
     maxlength: [20, 'Username must be at most 20 characters'],
     match: [/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores'],
   },
+  lichessUsername: {
+    type: String,
+    default: null,
+  },
+  chesscomUsername: {
+    type: String,
+    default: null,
+  },
   email: {
     type: String,
     required: [true, 'Email is required'],

@@ -28,6 +28,8 @@ const navItems = [
     items: [
       { href: '/watch', icon: '🏆', label: 'Leaderboard' },
       { href: '/watch', icon: '📰', label: 'Watch Live' },
+      { href: '/lichess', icon: '🔍', label: 'Lichess Database', badge: 'Hot' },
+      { href: '/chesscom', icon: '♟️', label: 'Chess.com Database', badge: 'New' },
     ],
   },
 ];
