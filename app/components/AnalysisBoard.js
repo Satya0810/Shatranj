@@ -828,6 +828,8 @@ export default function AnalysisBoard() {
 
                 let whiteAccSum = 0;
                 let blackAccSum = 0;
+                let whiteAcplSum = 0;
+                let blackAcplSum = 0;
                 let whiteMovesCount = 0;
                 let blackMovesCount = 0;
 
@@ -847,44 +849,49 @@ export default function AnalysisBoard() {
                   // Loss in win probability
                   const loss = Math.max(0, wBefore - wAfter);
 
+                  // Centipawn loss (cap at 1000 to prevent a single blunder from destroying everything)
+                  const cpl = Math.max(0, Math.min(1000, eBefore - eAfter));
+
                   // Lichess Move Accuracy formula
                   const moveAcc = Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * loss) - 3.1669));
 
                   if (isWhiteMove) {
                     whiteAccSum += moveAcc;
+                    whiteAcplSum += cpl;
                     whiteMovesCount++;
                   } else {
                     blackAccSum += moveAcc;
+                    blackAcplSum += cpl;
                     blackMovesCount++;
                   }
                 }
 
                 const whiteAccuracy = whiteMovesCount > 0 ? Math.round(whiteAccSum / whiteMovesCount) : 100;
                 const blackAccuracy = blackMovesCount > 0 ? Math.round(blackAccSum / blackMovesCount) : 100;
+                
+                const whiteAcpl = whiteMovesCount > 0 ? Math.round(whiteAcplSum / whiteMovesCount) : 0;
+                const blackAcpl = blackMovesCount > 0 ? Math.round(blackAcplSum / blackMovesCount) : 0;
 
-                const getEstimatedElo = (acc) => {
-                  if (acc <= 10) return 100;
-                  if (acc >= 100) return 3200;
-                  
-                  const mapping = [
-                    [10, 100], [20, 200], [30, 300], [40, 400], [50, 500],
-                    [60, 700], [70, 1000], [80, 1500], [90, 2100], [95, 2600],
-                    [99, 3000], [100, 3200]
-                  ];
-                  
-                  for (let i = 0; i < mapping.length - 1; i++) {
-                    const [acc1, elo1] = mapping[i];
-                    const [acc2, elo2] = mapping[i + 1];
-                    if (acc >= acc1 && acc <= acc2) {
-                      const fraction = (acc - acc1) / (acc2 - acc1);
-                      return Math.round(elo1 + fraction * (elo2 - elo1));
-                    }
+                const getEstimatedElo = (acc, acpl) => {
+                  // Accuracy-based ELO estimation (Quadratic curve based on CAPS statistics)
+                  let eloAcc = 400;
+                  if (acc >= 50) {
+                    eloAcc = 400 + 2800 * Math.pow((acc - 50) / 50, 2);
+                  } else {
+                    eloAcc = 100 + (acc / 50) * 300;
                   }
-                  return 100;
+
+                  // ACPL-based ELO estimation (Exponential curve based on centipawn loss research)
+                  const eloAcpl = 3200 * Math.exp(-0.015 * acpl);
+
+                  // Blend them together for a highly robust "Game Rating"
+                  let finalElo = Math.round((eloAcc + eloAcpl) / 2);
+                  
+                  return Math.max(100, Math.min(3200, finalElo));
                 };
 
-                const whiteElo = getEstimatedElo(whiteAccuracy);
-                const blackElo = getEstimatedElo(blackAccuracy);
+                const whiteElo = getEstimatedElo(whiteAccuracy, whiteAcpl);
+                const blackElo = getEstimatedElo(blackAccuracy, blackAcpl);
 
                 const getRowStyle = (color) => ({ textAlign: 'center', fontFamily: 'var(--font-mono)', color });
 
