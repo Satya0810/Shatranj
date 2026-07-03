@@ -4,12 +4,10 @@ const GameSchema = new mongoose.Schema({
   whitePlayer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
   },
   blackPlayer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: true,
   },
   pgn: {
     type: String,
@@ -44,6 +42,24 @@ const GameSchema = new mongoose.Schema({
     type: Date,
     default: null,
   },
+  platform: {
+    type: String,
+    enum: ['local', 'chess.com', 'lichess'],
+    default: 'local',
+  },
+  owner: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+  },
+  externalWhite: {
+    type: String,
+  },
+  externalBlack: {
+    type: String,
+  },
+  analysisReport: {
+    type: Object, // Will store { whiteAccuracy, blackAccuracy, classifications }
+  }
 }, {
   timestamps: true,
 });

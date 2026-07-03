@@ -21,6 +21,7 @@ const navItems = [
     items: [
       { href: '/puzzles', icon: '🧩', label: 'Puzzles', badge: 'New' },
       { href: '/analyze', icon: '📊', label: 'Analysis Board' },
+      { href: '/history', icon: '📖', label: 'Game History' },
     ],
   },
   {

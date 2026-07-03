@@ -24,6 +24,7 @@ const SAMPLE_PGN = `[Event "Immortal Game"]
 
 export default function AnalysisBoard() {
   const searchParams = useSearchParams();
+  const gameId = searchParams.get('gameId');
   const [game, setGame] = useState(new Chess());
   const [fullHistory, setFullHistory] = useState([]);
   const [currentMoveIndex, setCurrentMoveIndex] = useState(-1);
@@ -400,10 +401,32 @@ export default function AnalysisBoard() {
       setSummaryLoading(false);
     })
     .catch(() => setSummaryLoading(false));
+
+    // Save Analysis to DB if gameId is present
+    if (gameId) {
+      // Need token for auth
+      const token = document.cookie.split('; ').find(row => row.startsWith('token='))?.split('=')[1];
+      if (token) {
+        fetch(`/api/games/${gameId}/analysis`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            analysisReport: {
+              whiteAccuracy,
+              blackAccuracy,
+              classifications: counts
+            }
+          })
+        }).catch(err => console.error("Failed to save analysis:", err));
+      }
+    }
     
     // Restore multi PV for live analysis
     engine.setMultiPV(3);
-  }, [fullHistory]);
+  }, [fullHistory, gameId]);
 
   // Load PGN from URL params
   useEffect(() => {
@@ -434,6 +457,21 @@ export default function AnalysisBoard() {
         .catch(err => {
           console.error("Failed to fetch Lichess game:", err);
         });
+    } else if (gameId) {
+      // If we have a local gameId, we should fetch it if we don't already pass PGN
+      // However, usually PGN is passed via searchParams or we can just fetch it here.
+      fetch(`/api/games/${gameId}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.pgn) {
+            setPgnInput(data.pgn);
+            loadPgn(data.pgn);
+            if (autoAnalyzeParam === 'true') {
+              setShouldAutoAnalyze(true);
+            }
+          }
+        })
+        .catch(err => console.error("Failed to fetch local game:", err));
     }
   }, [searchParams, loadPgn]);
 
