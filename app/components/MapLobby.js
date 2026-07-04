@@ -74,7 +74,7 @@ export default function MapLobby({ userPosition, mapPlayers, onChallenge, incomi
         Leave Map Lobby
       </button>
 
-      <MapContainer center={[userPosition.lat, userPosition.lng]} zoom={3} style={{ height: '100%', width: '100%', background: '#aadaff' }}>
+      <MapContainer center={[userPosition.lat, userPosition.lng]} zoom={14} style={{ height: '100%', width: '100%', background: '#aadaff' }}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -91,7 +91,7 @@ export default function MapLobby({ userPosition, mapPlayers, onChallenge, incomi
         </Marker>
 
         {/* Pulse circle around user */}
-        <Circle center={[userPosition.lat, userPosition.lng]} radius={1000000} pathOptions={{ color: '#81b64a', fillColor: '#81b64a', fillOpacity: 0.08, weight: 1 }} />
+        <Circle center={[userPosition.lat, userPosition.lng]} radius={2000} pathOptions={{ color: '#81b64a', fillColor: '#81b64a', fillOpacity: 0.08, weight: 1 }} />
 
         {/* Dashed lines connecting you to each player */}
         {mapPlayers.map(player => (
