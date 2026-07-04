@@ -64,6 +64,7 @@ export default function PlayOnline() {
   const remoteVideoRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
+  const audioContextRef = useRef(null); // Reference for audio amplification context
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [remoteStream, setRemoteStream] = useState(null);
@@ -308,10 +309,38 @@ export default function PlayOnline() {
           channelCount: 1
         } 
       });
-      localStreamRef.current = stream;
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      // Amplify the audio using Web Audio API before sending over WebRTC
+      try {
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        audioContextRef.current = audioCtx;
+        
+        const source = audioCtx.createMediaStreamSource(stream);
+        const gainNode = audioCtx.createGain();
+        gainNode.gain.value = 2.5; // Amplify by 250%
+        
+        const destination = audioCtx.createMediaStreamDestination();
+        source.connect(gainNode);
+        gainNode.connect(destination);
+
+        const amplifiedAudioTrack = destination.stream.getAudioTracks()[0];
+        
+        const tracksToSend = [amplifiedAudioTrack];
+        if (withVideo) {
+          const videoTrack = stream.getVideoTracks()[0];
+          if (videoTrack) tracksToSend.push(videoTrack);
+        }
+
+        localStreamRef.current = stream;
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+        tracksToSend.forEach(track => pc.addTrack(track, stream));
+      } catch (audioErr) {
+        console.warn("Could not amplify audio, falling back to standard:", audioErr);
+        localStreamRef.current = stream;
+        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+      }
 
       if (isInitiator) {
         const offer = await pc.createOffer();
@@ -337,6 +366,10 @@ export default function PlayOnline() {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
     }
     setCallStatus('idle');
     setShowVideoSection(false);
@@ -429,6 +462,10 @@ export default function PlayOnline() {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
         localStreamRef.current = null;
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
       }
       setCallStatus('idle');
       setShowVideoSection(false);
