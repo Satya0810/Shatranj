@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Chess } from 'chess.js';
 import ChessGame from './ChessGame';
 import MoveList from './MoveList';
@@ -79,6 +79,7 @@ export default function PlayOnline() {
   const [chatInput, setChatInput] = useState('');
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const audioContextRef = useRef(null); // Reference for audio amplification context
@@ -592,8 +593,18 @@ export default function PlayOnline() {
       peerConnectionRef.current = pc;
 
       pc.ontrack = (event) => {
-        setRemoteStream(event.streams[0]);
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
+        let stream = event.streams[0];
+        if (!stream) {
+          if (!remoteVideoRef.current.srcObject) {
+            remoteVideoRef.current.srcObject = new MediaStream();
+          }
+          stream = remoteVideoRef.current.srcObject;
+          stream.addTrack(event.track);
+        }
+        
+        setRemoteStream(stream);
+        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
+        if (remoteAudioRef.current) remoteAudioRef.current.srcObject = stream;
       };
 
       pc.onicecandidate = (event) => {
@@ -622,6 +633,10 @@ export default function PlayOnline() {
       try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         audioContextRef.current = audioCtx;
+        
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(e => console.warn('Could not resume AudioContext', e));
+        }
         
         const source = audioCtx.createMediaStreamSource(stream);
         
@@ -787,10 +802,11 @@ export default function PlayOnline() {
       }
     };
 
-    const handleCallAccepted = () => {
+    const handleCallAccepted = (data) => {
       setCallStatus('connected');
-      if (callMode === 'share' || callMode === 'view') setShowVideoSection(true);
-      initializeWebRTC(true, callMode !== 'voice'); // Caller is initiator
+      const mode = data && data.mode ? data.mode : callMode;
+      if (mode === 'share' || mode === 'view') setShowVideoSection(true);
+      initializeWebRTC(true, mode === 'share'); // Caller is initiator, only sends video if sharing
     };
 
     const handleCallDeclined = () => {
@@ -1336,6 +1352,7 @@ export default function PlayOnline() {
         </div>
       </div>
     )}
+    <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
     <div className="play-layout" id="play-online-layout">
       {/* Video Section */}
       <div className="video-section" style={{ display: showVideoSection ? 'flex' : 'none', flexDirection: 'column', gap: 'var(--space-md)', width: '240px', flexShrink: 0 }}>
