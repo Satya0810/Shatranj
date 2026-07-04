@@ -316,7 +316,7 @@ export default function PlayOnline() {
 
   useEffect(() => {
     if (phase === 'playing' && gameId && !peerConnectionRef.current) {
-      initializeWebRTC(orientation === 'white');
+      // initializeWebRTC(orientation === 'white'); // Disabled to prevent browser crashes during local testing
     }
   }, [phase, gameId, orientation, initializeWebRTC]);
 
