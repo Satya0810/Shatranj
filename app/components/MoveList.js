@@ -22,14 +22,23 @@ export default function MoveList({
     }
   }, [currentMoveIndex]);
 
+  // Safely extract move text
+  const getMoveText = (moveObj) => {
+    if (!moveObj) return '';
+    if (typeof moveObj === 'string') return moveObj;
+    if (moveObj.san) return moveObj.san;
+    if (moveObj.from && moveObj.to) return `${moveObj.from}-${moveObj.to}`;
+    return '??';
+  };
+
   // Group moves into pairs (white, black)
   const movePairs = [];
   for (let i = 0; i < history.length; i += 2) {
     movePairs.push({
       number: Math.floor(i / 2) + 1,
-      white: { san: history[i]?.san || history[i], index: i },
+      white: { san: getMoveText(history[i]), index: i },
       black: i + 1 < history.length
-        ? { san: history[i + 1]?.san || history[i + 1], index: i + 1 }
+        ? { san: getMoveText(history[i + 1]), index: i + 1 }
         : null,
     });
   }
