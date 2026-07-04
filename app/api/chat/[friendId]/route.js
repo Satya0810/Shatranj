@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import connectDB from '../../../../lib/mongodb';
-import Message from '../../../../models/Message';
-import { verifyAuth } from '../../../../lib/auth';
+import connectDB from '../../../lib/mongodb';
+import Message from '../../../models/Message';
+import { verifyAuth } from '../../../lib/auth';
 
 export async function GET(req, { params }) {
   try {

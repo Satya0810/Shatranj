@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import connectDB from '../../../../lib/mongodb';
-import User from '../../../../models/User';
-import { verifyAuth } from '../../../../lib/auth';
+import connectDB from '../../../lib/mongodb';
+import User from '../../../models/User';
+import { verifyAuth } from '../../../lib/auth';
 
 export async function POST(req) {
   try {
