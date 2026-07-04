@@ -229,7 +229,7 @@ export default function PlayOnline() {
   const renderCapturedPieces = (capturedDict, advantage, capturedColor) => {
     const order = ['p', 'n', 'b', 'r', 'q'];
     return (
-      <div style={{ display: 'flex', alignItems: 'center', marginLeft: '8px', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', minHeight: '18px' }}>
         {order.map(pieceChar => {
           const dictKey = capturedColor === 'w' ? pieceChar.toUpperCase() : pieceChar.toLowerCase();
           const count = capturedDict[dictKey];
@@ -351,6 +351,13 @@ export default function PlayOnline() {
     socket.on('draw-offered', () => setDrawOffered(true));
     socket.on('draw-declined', () => {});
   };
+
+  useEffect(() => {
+    const socket = getSocket();
+    socketRef.current = socket;
+    registerGameListeners(socket);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const startSearching = useCallback(() => {
     if (!user) {
@@ -626,8 +633,14 @@ export default function PlayOnline() {
         }
         
         setRemoteStream(stream);
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
-        if (remoteAudioRef.current) remoteAudioRef.current.srcObject = stream;
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = stream;
+          remoteVideoRef.current.play().catch(e => console.warn('Video autoplay blocked:', e));
+        }
+        if (remoteAudioRef.current) {
+          remoteAudioRef.current.srcObject = stream;
+          remoteAudioRef.current.play().catch(e => console.warn('Audio autoplay blocked:', e));
+        }
       };
 
       pc.onicecandidate = (event) => {
@@ -1381,16 +1394,16 @@ export default function PlayOnline() {
     <div className="play-layout" id="play-online-layout">
       {/* Video Section */}
       <div className="video-section" style={{ display: showVideoSection ? 'flex' : 'none', flexDirection: 'column', gap: 'var(--space-md)', width: '240px', flexShrink: 0 }}>
-        <div className="card" style={{ padding: 'var(--space-sm)' }}>
+        <div className="card" style={{ padding: 'var(--space-sm)', position: 'relative' }}>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 600 }}>Opponent Video</div>
           <video 
             ref={remoteVideoRef} 
             autoPlay 
             playsInline 
-            style={{ width: '100%', aspectRatio: '4/3', borderRadius: 'var(--radius-md)', objectFit: 'cover', background: '#000', display: remoteStream ? 'block' : 'none' }} 
+            style={{ width: '100%', aspectRatio: '4/3', borderRadius: 'var(--radius-md)', objectFit: 'cover', background: '#000', display: 'block' }} 
           />
           {!remoteStream && (
-            <div style={{ width: '100%', aspectRatio: '4/3', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Waiting for opponent...</div>
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(30,30,30,0.8)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Waiting for opponent...</div>
           )}
         </div>
         {callMode === 'share' && (
@@ -1428,7 +1441,7 @@ export default function PlayOnline() {
           marginBottom: 'var(--space-sm)',
           border: '1px solid var(--border-subtle)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <div 
               style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', cursor: opponent?.username ? 'pointer' : 'default' }}
               onClick={() => opponent?.username && setShowProfileUsername(opponent.username)}
@@ -1478,7 +1491,7 @@ export default function PlayOnline() {
           marginTop: 'var(--space-sm)',
           border: '1px solid var(--border-subtle)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             <div 
               style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', cursor: user?.username ? 'pointer' : 'default' }}
               onClick={() => user?.username && setShowProfileUsername(user.username)}
