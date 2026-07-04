@@ -68,6 +68,7 @@ export default function PlayOnline() {
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [remoteStream, setRemoteStream] = useState(null);
   const [showVideoSection, setShowVideoSection] = useState(false);
+  const [callMode, setCallMode] = useState('voice');
 
   // Responsive board sizing
   useEffect(() => {
@@ -810,30 +811,31 @@ export default function PlayOnline() {
         {/* Controls */}
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-            <button
-              className={`btn btn-secondary`}
-              onClick={() => handleStartCall(false)}
-              style={{ flex: 1, padding: '8px 4px', fontSize: '13px' }}
-              title="Start Voice Call"
-            >
-              🎙️ Voice
-            </button>
-            <button
-              className={`btn ${showVideoSection && !localStreamRef.current?.getVideoTracks().length ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => { handleStartCall(false); setShowVideoSection(true); }}
-              style={{ flex: 1, padding: '8px 4px', fontSize: '13px' }}
-              title="View Opponent's Video (No Camera)"
-            >
-              👁️ View Video
-            </button>
-            <button
-              className={`btn ${showVideoSection && localStreamRef.current?.getVideoTracks().length ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => handleStartCall(true)}
-              style={{ flex: 1, padding: '8px 4px', fontSize: '13px' }}
-              title="Share Your Video"
-            >
-              📹 Share Video
-            </button>
+            <div style={{ flex: 2, display: 'flex', gap: '4px' }}>
+              <select 
+                className="btn btn-secondary" 
+                style={{ flex: 1, padding: '8px 4px', fontSize: '13px', borderRight: 'none', borderRadius: '4px 0 0 4px' }}
+                value={callMode}
+                onChange={e => setCallMode(e.target.value)}
+                title="Select Call Mode"
+              >
+                <option value="voice">🎙️ Voice Only</option>
+                <option value="view">👁️ View Video</option>
+                <option value="share">📹 Share Video</option>
+              </select>
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  if (callMode === 'voice') handleStartCall(false);
+                  else if (callMode === 'view') { handleStartCall(false); setShowVideoSection(true); }
+                  else if (callMode === 'share') handleStartCall(true);
+                }}
+                style={{ padding: '8px 12px', fontSize: '13px', borderRadius: '0 4px 4px 0' }}
+                title="Join Conversation"
+              >
+                Join
+              </button>
+            </div>
             <button
               className="btn btn-secondary"
               onClick={handleOfferDraw}
