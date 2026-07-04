@@ -12,6 +12,7 @@ const PORT = process.env.PORT || 3000;
 
 // In-memory lobby and game state
 const lobby = []; // { socketId, userId, username, rating }
+const nearbyLobbies = new Map(); // ipAddress -> [ { socketId, userId, username, rating, timeControl } ]
 const activeGames = new Map(); // gameId -> { chess, white, black, timeControl, whiteTime, blackTime, lastMoveTime, timerInterval }
 const onlineUsers = new Map(); // userId -> socketId
 
@@ -104,6 +105,108 @@ app.prepare().then(() => {
         onlineUsers.set(data.userId, socket.id);
         console.log(`User ${data.userId} authenticated on socket ${socket.id}`);
       }
+    });
+
+    const getClientIp = (socket) => {
+      return socket.handshake.headers['x-forwarded-for']?.split(',')[0].trim() || socket.handshake.address;
+    };
+
+    const broadcastNearby = (ip) => {
+      const players = nearbyLobbies.get(ip) || [];
+      players.forEach(p => {
+        io.to(p.socketId).emit('nearby-players', players.filter(other => other.socketId !== p.socketId));
+      });
+    };
+
+    socket.on('join-nearby', (data) => {
+      const ip = getClientIp(socket);
+      const players = nearbyLobbies.get(ip) || [];
+      const existingIdx = players.findIndex(p => p.socketId === socket.id);
+      if (existingIdx === -1) {
+        players.push({ ...data, socketId: socket.id, ip });
+        nearbyLobbies.set(ip, players);
+      } else {
+        players[existingIdx] = { ...data, socketId: socket.id, ip };
+      }
+      broadcastNearby(ip);
+      console.log(`[Nearby] ${data.username} joined on IP ${ip}. Total: ${players.length}`);
+    });
+
+    socket.on('leave-nearby', () => {
+      const ip = getClientIp(socket);
+      const players = nearbyLobbies.get(ip);
+      if (players) {
+        const idx = players.findIndex(p => p.socketId === socket.id);
+        if (idx !== -1) {
+          players.splice(idx, 1);
+          if (players.length === 0) {
+            nearbyLobbies.delete(ip);
+          } else {
+            broadcastNearby(ip);
+          }
+        }
+      }
+    });
+
+    socket.on('challenge-nearby', (data) => {
+      const { targetSocketId, timeControl } = data;
+      const ip = getClientIp(socket);
+      const players = nearbyLobbies.get(ip) || [];
+      const challenger = players.find(p => p.socketId === socket.id);
+      if (challenger) {
+        io.to(targetSocketId).emit('incoming-challenge', { challenger: { ...challenger, timeControl } });
+      }
+    });
+
+    socket.on('accept-nearby-challenge', (data) => {
+      const { challengerSocketId } = data;
+      const ip = getClientIp(socket);
+      const players = nearbyLobbies.get(ip) || [];
+      const challenger = players.find(p => p.socketId === challengerSocketId);
+      const acceptor = players.find(p => p.socketId === socket.id);
+
+      if (challenger && acceptor) {
+        // Start game
+        const isWhite = Math.random() > 0.5;
+        const white = isWhite ? acceptor : challenger;
+        const black = isWhite ? challenger : acceptor;
+        
+        // Take time control from challenger
+        const tc = challenger.timeControl || { minutes: 10, increment: 0 };
+
+        const gameId = `game_nearby_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const chess = new Chess();
+        const initialTime = tc.minutes * 60 * 1000;
+
+        activeGames.set(gameId, {
+          chess,
+          white,
+          black,
+          timeControl: tc,
+          whiteTime: initialTime,
+          blackTime: initialTime,
+          lastMoveTime: Date.now(),
+          timerInterval: null,
+        });
+
+        const gameData = { gameId, timeControl: tc, whiteTime: initialTime, blackTime: initialTime };
+
+        io.to(white.socketId).emit('game-start', {
+          ...gameData, color: 'white', opponent: { username: black.username, rating: black.rating, userId: black.userId },
+        });
+        io.to(black.socketId).emit('game-start', {
+          ...gameData, color: 'black', opponent: { username: white.username, rating: white.rating, userId: white.userId },
+        });
+
+        const whiteSocket = io.sockets.sockets.get(white.socketId);
+        const blackSocket = io.sockets.sockets.get(black.socketId);
+        if (whiteSocket) whiteSocket.join(gameId);
+        if (blackSocket) blackSocket.join(gameId);
+      }
+    });
+
+    socket.on('decline-nearby-challenge', (data) => {
+      io.to(data.challengerSocketId).emit('challenge-declined');
     });
 
     // Join matchmaking lobby
@@ -458,6 +561,18 @@ app.prepare().then(() => {
       // Remove from lobby
       const lobbyIdx = lobby.findIndex(p => p.socketId === socket.id);
       if (lobbyIdx !== -1) lobby.splice(lobbyIdx, 1);
+
+      // Remove from nearbyLobbies
+      const ip = getClientIp(socket);
+      const nearbyPlayers = nearbyLobbies.get(ip);
+      if (nearbyPlayers) {
+        const idx = nearbyPlayers.findIndex(p => p.socketId === socket.id);
+        if (idx !== -1) {
+          nearbyPlayers.splice(idx, 1);
+          if (nearbyPlayers.length === 0) nearbyLobbies.delete(ip);
+          else broadcastNearby(ip);
+        }
+      }
 
       // Check if player was in an active game
       for (const [gameId, game] of activeGames.entries()) {

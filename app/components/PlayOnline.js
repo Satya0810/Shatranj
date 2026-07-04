@@ -43,6 +43,11 @@ export default function PlayOnline() {
   const socketRef = useRef(null);
   const searchIntervalRef = useRef(null);
 
+  // Nearby Play State
+  const [nearbyPlayers, setNearbyPlayers] = useState([]);
+  const [incomingChallenge, setIncomingChallenge] = useState(null);
+  const [sentChallenge, setSentChallenge] = useState(null);
+
   const [showProfileUsername, setShowProfileUsername] = useState(null);
   const clockIntervalRef = useRef(null);
   const lastMoveTimeRef = useRef(null);
@@ -144,6 +149,78 @@ export default function PlayOnline() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  const registerGameListeners = (socket) => {
+    socket.off('game-start');
+    socket.off('move-made');
+    socket.off('game-over');
+    socket.off('draw-offered');
+    socket.off('draw-declined');
+
+    socket.on('game-start', (data) => {
+      if (searchIntervalRef.current) clearInterval(searchIntervalRef.current);
+      setGameId(data.gameId);
+      setOrientation(data.color);
+      setOpponent(data.opponent);
+      setWhiteTime(data.whiteTime);
+      setBlackTime(data.blackTime);
+      setGame(new Chess());
+      setHistory([]);
+      setCurrentMoveIndex(-1);
+      setPhase('playing');
+      lastMoveTimeRef.current = Date.now();
+      setIncomingChallenge(null);
+      setSentChallenge(null);
+    });
+
+    socket.on('move-made', (data) => {
+      setGame(prev => {
+        const newGame = new Chess(data.fen);
+        return newGame;
+      });
+      setWhiteTime(data.whiteTime);
+      setBlackTime(data.blackTime);
+      lastMoveTimeRef.current = Date.now();
+
+      if (data.history) {
+        setHistory(data.history);
+      }
+      setCurrentMoveIndex(prev => prev + 1);
+    });
+
+    socket.on('game-over', (data) => {
+      if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
+      setWhiteTime(data.whiteTime);
+      setBlackTime(data.blackTime);
+
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+      setCallStatus('idle');
+      setShowVideoSection(false);
+      
+      let result;
+      if (data.winner === null) {
+        result = { result: 'draw', winner: null };
+      } else {
+        result = { result: data.reason, winner: data.winner };
+      }
+      setGameResult(result);
+      setPhase('gameover');
+    });
+
+    socket.on('draw-offered', () => setDrawOffered(true));
+    socket.on('draw-declined', () => {});
+  };
+
   const startSearching = useCallback(() => {
     if (!user) {
       openAuthModal();
@@ -168,83 +245,82 @@ export default function PlayOnline() {
       timeControl: { minutes: tc.minutes, increment: tc.increment },
     });
 
-    // Listen for game start
-    socket.on('game-start', (data) => {
-      if (searchIntervalRef.current) clearInterval(searchIntervalRef.current);
-      
-      setGameId(data.gameId);
-      setOrientation(data.color);
-      setOpponent(data.opponent);
-      setWhiteTime(data.whiteTime);
-      setBlackTime(data.blackTime);
-      setGame(new Chess());
-      setHistory([]);
-      setCurrentMoveIndex(-1);
-      setPhase('playing');
-      lastMoveTimeRef.current = Date.now();
-    });
-
-    // Listen for moves
-    socket.on('move-made', (data) => {
-      setGame(prev => {
-        const newGame = new Chess(data.fen);
-        return newGame;
-      });
-      setWhiteTime(data.whiteTime);
-      setBlackTime(data.blackTime);
-      lastMoveTimeRef.current = Date.now();
-
-      if (data.history) {
-        setHistory(data.history);
-      }
-      setCurrentMoveIndex(prev => prev + 1);
-    });
-
-    // Listen for game over
-    socket.on('game-over', (data) => {
-      if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
-      setWhiteTime(data.whiteTime);
-      setBlackTime(data.blackTime);
-
-      // Automatically hang up any active calls when the game ends
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-        peerConnectionRef.current = null;
-      }
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-        localStreamRef.current = null;
-      }
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-      }
-      setCallStatus('idle');
-      setShowVideoSection(false);
-      
-      let result;
-      if (data.winner === null) {
-        result = { result: 'draw', winner: null };
-      } else {
-        result = {
-          result: data.reason,
-          winner: data.winner,
-        };
-      }
-      setGameResult(result);
-      setPhase('gameover');
-    });
-
-    // Listen for draw offers
-    socket.on('draw-offered', () => {
-      setDrawOffered(true);
-    });
-
-    socket.on('draw-declined', () => {
-      // Could show a notification
-    });
-
+    registerGameListeners(socket);
   }, [user, openAuthModal, selectedTC]);
+
+  const startNearby = useCallback(() => {
+    if (!user) {
+      openAuthModal();
+      return;
+    }
+    const socket = getSocket();
+    socketRef.current = socket;
+    setPhase('nearby');
+    socket.emit('auth', { userId: user.id });
+
+    const tc = TIME_CONTROLS[selectedTC];
+    socket.emit('join-nearby', {
+      userId: user.id,
+      username: user.username,
+      rating: user.rating,
+      timeControl: { minutes: tc.minutes, increment: tc.increment },
+    });
+
+    socket.off('nearby-players');
+    socket.off('incoming-challenge');
+    socket.off('challenge-declined');
+
+    socket.on('nearby-players', (players) => {
+      setNearbyPlayers(players);
+    });
+
+    socket.on('incoming-challenge', (data) => {
+      setIncomingChallenge(data.challenger);
+    });
+
+    socket.on('challenge-declined', () => {
+      setSentChallenge(null);
+      alert('Challenge declined');
+    });
+
+    registerGameListeners(socket);
+  }, [user, openAuthModal, selectedTC]);
+
+  const cancelNearby = useCallback(() => {
+    const socket = socketRef.current;
+    if (socket) {
+      socket.emit('leave-nearby', {});
+    }
+    setPhase('setup');
+    setNearbyPlayers([]);
+    setIncomingChallenge(null);
+    setSentChallenge(null);
+  }, []);
+
+  const challengeNearbyPlayer = (targetSocketId, username) => {
+    const socket = socketRef.current;
+    if (socket) {
+      const tc = TIME_CONTROLS[selectedTC];
+      socket.emit('challenge-nearby', { targetSocketId, timeControl: { minutes: tc.minutes, increment: tc.increment } });
+      setSentChallenge(username);
+    }
+  };
+
+  const acceptNearbyChallenge = () => {
+    const socket = socketRef.current;
+    if (socket && incomingChallenge) {
+      socket.emit('accept-nearby-challenge', { challengerSocketId: incomingChallenge.socketId });
+    }
+  };
+
+  const declineNearbyChallenge = () => {
+    const socket = socketRef.current;
+    if (socket && incomingChallenge) {
+      socket.emit('decline-nearby-challenge', { challengerSocketId: incomingChallenge.socketId });
+      setIncomingChallenge(null);
+    }
+  };
+
 
   const cancelSearch = useCallback(() => {
     if (searchIntervalRef.current) clearInterval(searchIntervalRef.current);
@@ -334,11 +410,30 @@ export default function PlayOnline() {
         audioContextRef.current = audioCtx;
         
         const source = audioCtx.createMediaStreamSource(stream);
+        
+        // 1. High-pass filter to remove low frequency rumble/noise
+        const highpass = audioCtx.createBiquadFilter();
+        highpass.type = 'highpass';
+        highpass.frequency.value = 85; 
+        
+        // 2. Dynamics Compressor to normalize voice levels
+        const compressor = audioCtx.createDynamicsCompressor();
+        compressor.threshold.value = -40; // DB threshold to start compressing
+        compressor.knee.value = 20;
+        compressor.ratio.value = 10;
+        compressor.attack.value = 0.005;
+        compressor.release.value = 0.1;
+        
+        // 3. Gain Node for extra amplification
         const gainNode = audioCtx.createGain();
-        gainNode.gain.value = 2.5; // Amplify by 250%
+        gainNode.gain.value = 2.0; 
         
         const destination = audioCtx.createMediaStreamDestination();
-        source.connect(gainNode);
+        
+        // Chain: source -> highpass -> compressor -> gain -> destination
+        source.connect(highpass);
+        highpass.connect(compressor);
+        compressor.connect(gainNode);
         gainNode.connect(destination);
 
         const amplifiedAudioTrack = destination.stream.getAudioTracks()[0];
@@ -658,9 +753,125 @@ export default function PlayOnline() {
               >
                 {user ? '🎮 Find Opponent' : '🔑 Sign In to Play'}
               </button>
+              
+              <button
+                className="btn btn-secondary"
+                onClick={startNearby}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  fontSize: '16px',
+                  fontWeight: 700,
+                  marginTop: 'var(--space-sm)'
+                }}
+              >
+                {user ? '📡 Play Nearby (WiFi)' : '🔑 Sign In to Play Nearby'}
+              </button>
             </div>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  // NEARBY PHASE
+  if (phase === 'nearby') {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: 'calc(100vh - 60px)',
+        padding: 'var(--space-xl)',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        {/* Radar Animation Rings */}
+        <div style={{
+          position: 'absolute',
+          width: '600px', height: '600px',
+          border: '1px solid rgba(129, 182, 74, 0.2)',
+          borderRadius: '50%',
+          top: '50%', left: '50%',
+          transform: 'translate(-50%, -50%)',
+          animation: 'ping 3s cubic-bezier(0, 0, 0.2, 1) infinite'
+        }} />
+        <div style={{
+          position: 'absolute',
+          width: '400px', height: '400px',
+          border: '2px solid rgba(129, 182, 74, 0.3)',
+          borderRadius: '50%',
+          top: '50%', left: '50%',
+          transform: 'translate(-50%, -50%)',
+        }} />
+
+        <div style={{ textAlign: 'center', zIndex: 10 }}>
+          <div style={{
+            width: '100px',
+            height: '100px',
+            background: 'var(--accent-green)',
+            borderRadius: '50%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '40px',
+            color: 'white',
+            margin: '0 auto var(--space-xl)',
+            boxShadow: '0 0 20px rgba(129, 182, 74, 0.4)'
+          }}>
+            👤
+          </div>
+          <h2 style={{ marginBottom: 'var(--space-sm)' }}>You ({user?.username})</h2>
+          <p style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-xl)' }}>Searching for players on your WiFi...</p>
+          
+          <div style={{ display: 'flex', gap: 'var(--space-md)', justifyContent: 'center', flexWrap: 'wrap', maxWidth: '600px' }}>
+            {nearbyPlayers.length === 0 ? (
+              <div style={{ color: 'var(--text-muted)' }}>No one else is here right now.</div>
+            ) : (
+              nearbyPlayers.map(p => (
+                <div key={p.socketId} style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => challengeNearbyPlayer(p.socketId, p.username)}>
+                  <div style={{
+                    width: '70px', height: '70px',
+                    borderRadius: '50%',
+                    background: sentChallenge === p.username ? 'var(--accent-orange)' : 'var(--bg-surface-hover)',
+                    border: '2px solid var(--border-color)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '24px', margin: '0 auto 8px',
+                    transition: 'all 0.2s'
+                  }}>
+                    {sentChallenge === p.username ? '⌛' : '👤'}
+                  </div>
+                  <div style={{ fontWeight: 600 }}>{p.username}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{p.rating}</div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <button className="btn btn-secondary" onClick={cancelNearby} style={{ marginTop: 'var(--space-2xl)' }}>
+            ✕ Cancel
+          </button>
+        </div>
+
+        {/* Incoming Challenge Modal */}
+        {incomingChallenge && (
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100
+          }}>
+            <div className="card" style={{ padding: 'var(--space-xl)', textAlign: 'center', maxWidth: '300px' }}>
+              <div style={{ fontSize: '40px', marginBottom: 'var(--space-md)' }}>⚔️</div>
+              <h3>Challenge Received!</h3>
+              <p style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-xl)' }}>
+                <strong>{incomingChallenge.username}</strong> ({incomingChallenge.rating}) challenged you to a game.
+              </p>
+              <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+                <button className="btn btn-primary" onClick={acceptNearbyChallenge} style={{ flex: 1 }}>Accept</button>
+                <button className="btn btn-secondary" onClick={declineNearbyChallenge} style={{ flex: 1 }}>Decline</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
