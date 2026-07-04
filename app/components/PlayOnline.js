@@ -274,7 +274,7 @@ export default function PlayOnline() {
   }, [gameId]);
 
   // WebRTC Setup
-  const initializeWebRTC = useCallback(async (isInitiator) => {
+  const initializeWebRTC = useCallback(async (isInitiator, withVideo = true) => {
     try {
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       peerConnectionRef.current = pc;
@@ -296,7 +296,7 @@ export default function PlayOnline() {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: true, 
+        video: withVideo, 
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -320,9 +320,16 @@ export default function PlayOnline() {
     }
   }, [gameId]);
 
+  const handleStartCall = (withVideo) => {
+    if (withVideo) setShowVideoSection(true);
+    if (!peerConnectionRef.current) {
+      initializeWebRTC(orientation === 'white', withVideo);
+    }
+  };
+
   useEffect(() => {
     if (phase === 'playing' && gameId && !peerConnectionRef.current) {
-      initializeWebRTC(orientation === 'white');
+      // Auto-start disabled, user must click Voice or Video
     }
   }, [phase, gameId, orientation, initializeWebRTC]);
 
@@ -804,10 +811,18 @@ export default function PlayOnline() {
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 'var(--space-sm)' }}>
             <button
-              className={`btn ${showVideoSection ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => setShowVideoSection(!showVideoSection)}
+              className={`btn btn-secondary`}
+              onClick={() => handleStartCall(false)}
               style={{ flex: 1 }}
-              title="Toggle Video Chat"
+              title="Start Voice Call"
+            >
+              🎙️ Voice
+            </button>
+            <button
+              className={`btn ${showVideoSection ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => handleStartCall(true)}
+              style={{ flex: 1 }}
+              title="Start Video Chat"
             >
               📹 Video
             </button>
