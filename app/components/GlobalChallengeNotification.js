@@ -10,9 +10,10 @@ export default function GlobalChallengeNotification() {
   if (!globalChallenge) return null;
 
   const handleAccept = () => {
-    acceptGlobalChallenge();
-    // Redirect to play online page so the game-start event is caught
     router.push('/play/online');
+    setTimeout(() => {
+      acceptGlobalChallenge();
+    }, 500);
   };
 
   return (
@@ -44,7 +45,7 @@ export default function GlobalChallengeNotification() {
         <div>
           <div style={{ fontWeight: 700, fontSize: '16px', color: '#e2e8f0' }}>⚔️ Challenge Received!</div>
           <div style={{ fontSize: '14px', color: '#94a3b8' }}>
-            <strong style={{ color: 'var(--accent-green)' }}>{globalChallenge.username}</strong> ({globalChallenge.rating}) wants to play
+            <strong style={{ color: 'var(--accent-green)' }}>{globalChallenge.username}</strong> ({globalChallenge.rating}) wants to play a <strong>{globalChallenge.timeControl ? (globalChallenge.timeControl.increment > 0 ? `${globalChallenge.timeControl.minutes}+${globalChallenge.timeControl.increment}` : `${globalChallenge.timeControl.minutes} min`) : 'Standard'}</strong> game
           </div>
         </div>
       </div>

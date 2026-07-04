@@ -49,11 +49,11 @@ export function AuthProvider({ children }) {
 
       // Listen for incoming challenges even if user is NOT on the Play Online page
       socket.on('incoming-challenge', (data) => {
-        setGlobalChallenge(data.challenger);
+        setGlobalChallenge({ ...data.challenger, type: 'nearby' });
       });
 
       socket.on('incoming-map-challenge', (data) => {
-        setGlobalChallenge(data.challenger);
+        setGlobalChallenge({ ...data.challenger, type: 'map' });
       });
     }
 
@@ -69,7 +69,11 @@ export function AuthProvider({ children }) {
   const acceptGlobalChallenge = useCallback(() => {
     const socket = globalSocketRef.current;
     if (socket && globalChallenge) {
-      socket.emit('accept-nearby-challenge', { challengerSocketId: globalChallenge.socketId });
+      if (globalChallenge.type === 'map') {
+        socket.emit('accept-map-challenge', { challengerSocketId: globalChallenge.socketId });
+      } else {
+        socket.emit('accept-nearby-challenge', { challengerSocketId: globalChallenge.socketId });
+      }
       setGlobalChallenge(null);
     }
   }, [globalChallenge]);
@@ -77,7 +81,11 @@ export function AuthProvider({ children }) {
   const declineGlobalChallenge = useCallback(() => {
     const socket = globalSocketRef.current;
     if (socket && globalChallenge) {
-      socket.emit('decline-nearby-challenge', { challengerSocketId: globalChallenge.socketId });
+      if (globalChallenge.type === 'map') {
+        socket.emit('decline-map-challenge', { challengerSocketId: globalChallenge.socketId });
+      } else {
+        socket.emit('decline-nearby-challenge', { challengerSocketId: globalChallenge.socketId });
+      }
       setGlobalChallenge(null);
     }
   }, [globalChallenge]);

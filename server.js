@@ -136,22 +136,103 @@ app.prepare().then(() => {
       });
     };
 
-    // Broadcast ALL online users on the same IP to those in the nearby lobby
-    const broadcastNearbyAll = (ip) => {
+    const broadcastNearbyAll = async (ip) => {
       const lobbyMembers = nearbyLobbies.get(ip) || [];
-      const allOnIp = onlineByIp.get(ip) || [];
+      if (lobbyMembers.length === 0) return;
       
+      const allOnIp = onlineByIp.get(ip) || [];
+      const onIpIds = allOnIp.map(u => u.userId);
+
+      let mockUsers = [];
+      try {
+        const { default: connectDB } = await import('./app/lib/mongodb.js');
+        const { default: User } = await import('./app/models/User.js');
+        await connectDB();
+        const dbUsers = await User.find({ _id: { $nin: onIpIds } }).limit(30).lean();
+        
+        mockUsers = dbUsers.map(u => {
+          const isOnline = onlineUsers.has(u._id.toString());
+          const socketId = isOnline ? onlineUsers.get(u._id.toString()) : `offline_${u._id}`;
+          return {
+            socketId: socketId,
+            userId: u._id.toString(),
+            username: u.username,
+            rating: u.rating,
+          };
+        });
+      } catch (err) {
+        console.error('Error fetching mock nearby users:', err);
+      }
+
       lobbyMembers.forEach(member => {
-        // Send all other users on same IP (whether they're in lobby or not)
         const others = allOnIp.filter(u => u.socketId !== member.socketId);
-        io.to(member.socketId).emit('nearby-players', others);
+        const combined = [...others, ...mockUsers.filter(u => u.socketId !== member.socketId)];
+        io.to(member.socketId).emit('nearby-players', combined);
       });
     };
 
-    const broadcastMapLobby = () => {
-      const players = Array.from(mapPlayers.values());
-      players.forEach(p => {
-        io.to(p.socketId).emit('map-players', players.filter(other => other.socketId !== p.socketId));
+    const broadcastMapLobby = async () => {
+      const activePlayers = Array.from(mapPlayers.values());
+      if (activePlayers.length === 0) return;
+
+      let allUsers = [];
+      try {
+        const { default: connectDB } = await import('./app/lib/mongodb.js');
+        const { default: User } = await import('./app/models/User.js');
+        await connectDB();
+        const activeUserIds = activePlayers.map(p => p.userId);
+        allUsers = await User.find({ _id: { $nin: activeUserIds } }).limit(50).lean();
+      } catch (err) {
+        console.error('Error fetching users for map lobby:', err);
+      }
+
+      activePlayers.forEach(p => {
+        const others = activePlayers.filter(other => other.socketId !== p.socketId);
+        
+        const offlineNearby = allUsers.map(u => {
+          let hash = 0;
+          const str = u._id.toString();
+          for (let i = 0; i < str.length; i++) {
+            hash = ((hash << 5) - hash) + str.charCodeAt(i);
+            hash |= 0;
+          }
+          const rand1 = Math.abs(Math.sin(hash)) * 10000 % 1;
+          const rand2 = Math.abs(Math.cos(hash)) * 10000 % 1;
+          const maxOffset = 5 / 111; // ~5km
+          const isOnline = onlineUsers.has(u._id.toString());
+          const socketId = isOnline ? onlineUsers.get(u._id.toString()) : `offline_${u._id}`;
+          
+          return {
+            socketId: socketId,
+            userId: u._id.toString(),
+            username: u.username,
+            rating: u.rating,
+            lat: p.lat + (rand1 - 0.5) * 2 * maxOffset,
+            lng: p.lng + (rand2 - 0.5) * 2 * maxOffset,
+            isOffline: !isOnline
+          };
+        });
+
+        const allNearby = [...others, ...offlineNearby];
+        
+        const getDistance = (lat1, lng1, lat2, lng2) => {
+          const R = 6371;
+          const dLat = (lat2 - lat1) * Math.PI / 180;
+          const dLng = (lng2 - lng1) * Math.PI / 180;
+          const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          return R * c;
+        };
+
+        allNearby.sort((a, b) => {
+          const distA = getDistance(p.lat, p.lng, a.lat, a.lng);
+          const distB = getDistance(p.lat, p.lng, b.lat, b.lng);
+          return distA - distB;
+        });
+
+        io.to(p.socketId).emit('map-players', allNearby);
       });
     };
 
@@ -171,16 +252,46 @@ app.prepare().then(() => {
 
     socket.on('challenge-map-player', (data) => {
       const { targetSocketId, timeControl } = data;
+      if (targetSocketId.startsWith('offline_')) {
+        socket.emit('map-challenge-declined');
+        return;
+      }
       const challenger = mapPlayers.get(socket.id);
       if (challenger) {
         io.to(targetSocketId).emit('incoming-map-challenge', { challenger: { ...challenger, timeControl } });
       }
     });
 
-    socket.on('accept-map-challenge', (data) => {
+    socket.on('accept-map-challenge', async (data) => {
       const { challengerSocketId } = data;
       const challenger = mapPlayers.get(challengerSocketId);
-      const acceptor = mapPlayers.get(socket.id);
+      let acceptor = mapPlayers.get(socket.id);
+
+      if (!acceptor) {
+        let userId = null;
+        for (const [uId, sId] of onlineUsers.entries()) {
+          if (sId === socket.id) {
+            userId = uId;
+            break;
+          }
+        }
+        if (userId) {
+          try {
+            const { default: connectDB } = await import('./app/lib/mongodb.js');
+            const { default: User } = await import('./app/models/User.js');
+            await connectDB();
+            const userDoc = await User.findById(userId).lean();
+            if (userDoc) {
+              acceptor = {
+                socketId: socket.id,
+                userId: userDoc._id.toString(),
+                username: userDoc.username,
+                rating: userDoc.rating,
+              };
+            }
+          } catch (e) { console.error(e); }
+        }
+      }
 
       if (challenger && acceptor) {
         const isWhite = Math.random() > 0.5;
@@ -252,6 +363,10 @@ app.prepare().then(() => {
 
     socket.on('challenge-nearby', (data) => {
       const { targetSocketId, timeControl, note } = data;
+      if (targetSocketId.startsWith('offline_')) {
+        socket.emit('challenge-declined');
+        return;
+      }
       const ip = getClientIp(socket);
       const players = nearbyLobbies.get(ip) || [];
       const challenger = players.find(p => p.socketId === socket.id);
@@ -260,12 +375,42 @@ app.prepare().then(() => {
       }
     });
 
-    socket.on('accept-nearby-challenge', (data) => {
+    socket.on('accept-nearby-challenge', async (data) => {
       const { challengerSocketId } = data;
-      const ip = getClientIp(socket);
-      const players = nearbyLobbies.get(ip) || [];
-      const challenger = players.find(p => p.socketId === challengerSocketId);
-      const acceptor = players.find(p => p.socketId === socket.id);
+      
+      let challenger = null;
+      for (const lobby of nearbyLobbies.values()) {
+        const found = lobby.find(p => p.socketId === challengerSocketId);
+        if (found) {
+          challenger = found;
+          break;
+        }
+      }
+
+      let acceptor = null;
+      let userId = null;
+      for (const [uId, sId] of onlineUsers.entries()) {
+        if (sId === socket.id) {
+          userId = uId;
+          break;
+        }
+      }
+      if (userId) {
+        try {
+          const { default: connectDB } = await import('./app/lib/mongodb.js');
+          const { default: User } = await import('./app/models/User.js');
+          await connectDB();
+          const userDoc = await User.findById(userId).lean();
+          if (userDoc) {
+            acceptor = {
+              socketId: socket.id,
+              userId: userDoc._id.toString(),
+              username: userDoc.username,
+              rating: userDoc.rating,
+            };
+          }
+        } catch (e) { console.error(e); }
+      }
 
       if (challenger && acceptor) {
         // Start game

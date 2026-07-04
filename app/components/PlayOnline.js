@@ -108,9 +108,35 @@ export default function PlayOnline() {
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount, and also handle global game-starts
   useEffect(() => {
+    const socket = getSocket();
+    socketRef.current = socket;
+
+    // Handle game-starts from globally accepted challenges
+    const handleGlobalGameStart = (data) => {
+      if (searchIntervalRef.current) clearInterval(searchIntervalRef.current);
+      setGameId(data.gameId);
+      setOrientation(data.color);
+      setOpponent(data.opponent);
+      setWhiteTime(data.whiteTime);
+      setBlackTime(data.blackTime);
+      setGame(new Chess());
+      setHistory([]);
+      setCurrentMoveIndex(-1);
+      setPhase('playing');
+      lastMoveTimeRef.current = Date.now();
+      setIncomingChallenge(null);
+      setSentChallenge(null);
+      
+      // We must register the rest of the listeners now that a game started
+      registerGameListeners(socket);
+    };
+
+    socket.on('game-start', handleGlobalGameStart);
+
     return () => {
+      socket.off('game-start', handleGlobalGameStart);
       if (searchIntervalRef.current) clearInterval(searchIntervalRef.current);
       if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
       if (localStreamRef.current) {
@@ -566,7 +592,8 @@ export default function PlayOnline() {
         localStreamRef.current = stream;
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
-        tracksToSend.forEach(track => pc.addTrack(track, stream));
+        const streamToSend = new MediaStream(tracksToSend);
+        tracksToSend.forEach(track => pc.addTrack(track, streamToSend));
       } catch (audioErr) {
         console.warn("Could not amplify audio, falling back to standard:", audioErr);
         localStreamRef.current = stream;
@@ -589,6 +616,22 @@ export default function PlayOnline() {
     setCallStatus('calling');
     socketRef.current.emit('call-request', { gameId, mode });
   };
+
+  const handleAcceptCall = useCallback(() => {
+    if (!incomingCall || !socketRef.current) return;
+    setCallStatus('connected');
+    const mode = incomingCall.mode;
+    setShowVideoSection(mode === 'view' || mode === 'share');
+    socketRef.current.emit('call-accepted', { gameId, mode });
+    setIncomingCall(null);
+    initializeWebRTC(false, mode === 'share' || mode === 'view');
+  }, [incomingCall, gameId, initializeWebRTC]);
+
+  const handleDeclineCall = useCallback(() => {
+    if (!socketRef.current) return;
+    socketRef.current.emit('call-ended', { gameId });
+    setIncomingCall(null);
+  }, [gameId]);
 
   const handleHangUp = useCallback(() => {
     if (peerConnectionRef.current) {
@@ -1079,7 +1122,7 @@ export default function PlayOnline() {
               <div style={{ fontSize: '48px', marginBottom: 'var(--space-md)' }}>⚔️</div>
               <h3 style={{ marginBottom: 'var(--space-xs)' }}>Challenge Received!</h3>
               <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-md)', fontSize: '16px' }}>
-                <strong>{incomingChallenge.username}</strong> ({incomingChallenge.rating})
+                <strong>{incomingChallenge.username}</strong> ({incomingChallenge.rating}) wants to play a <strong>{incomingChallenge.timeControl ? (incomingChallenge.timeControl.increment > 0 ? `${incomingChallenge.timeControl.minutes}+${incomingChallenge.timeControl.increment}` : `${incomingChallenge.timeControl.minutes} min`) : 'Standard'}</strong> game
               </p>
               {incomingChallenge.note && (
                 <div style={{
@@ -1201,6 +1244,29 @@ export default function PlayOnline() {
   // PLAYING PHASE
   return (
     <>
+    {incomingCall && (
+      <div style={{
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+        backdropFilter: 'blur(4px)'
+      }}>
+        <div className="card" style={{ padding: 'var(--space-xl)', textAlign: 'center', maxWidth: '360px', width: '90%' }}>
+          <div style={{ fontSize: '48px', marginBottom: 'var(--space-md)' }}>📞</div>
+          <h3 style={{ marginBottom: 'var(--space-xs)' }}>Incoming Call</h3>
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-md)', fontSize: '16px' }}>
+            Opponent wants to start a <strong>{incomingCall.mode === 'voice' ? 'Voice' : 'Video'}</strong> call.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+            <button className="btn btn-primary" onClick={handleAcceptCall} style={{ width: '100%', fontWeight: 700 }}>
+              ✅ Accept
+            </button>
+            <button className="btn btn-secondary" onClick={handleDeclineCall} style={{ width: '100%' }}>
+              ✕ Decline
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     <div className="play-layout" id="play-online-layout">
       {/* Video Section */}
       <div className="video-section" style={{ display: showVideoSection ? 'flex' : 'none', flexDirection: 'column', gap: 'var(--space-md)', width: '240px', flexShrink: 0 }}>
