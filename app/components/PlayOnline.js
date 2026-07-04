@@ -813,18 +813,26 @@ export default function PlayOnline() {
             <button
               className={`btn btn-secondary`}
               onClick={() => handleStartCall(false)}
-              style={{ flex: 1 }}
+              style={{ flex: 1, padding: '8px 4px', fontSize: '13px' }}
               title="Start Voice Call"
             >
               🎙️ Voice
             </button>
             <button
-              className={`btn ${showVideoSection ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => handleStartCall(true)}
-              style={{ flex: 1 }}
-              title="Start Video Chat"
+              className={`btn ${showVideoSection && !localStreamRef.current?.getVideoTracks().length ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => { handleStartCall(false); setShowVideoSection(true); }}
+              style={{ flex: 1, padding: '8px 4px', fontSize: '13px' }}
+              title="View Opponent's Video (No Camera)"
             >
-              📹 Video
+              👁️ View Video
+            </button>
+            <button
+              className={`btn ${showVideoSection && localStreamRef.current?.getVideoTracks().length ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => handleStartCall(true)}
+              style={{ flex: 1, padding: '8px 4px', fontSize: '13px' }}
+              title="Share Your Video"
+            >
+              📹 Share Video
             </button>
             <button
               className="btn btn-secondary"
