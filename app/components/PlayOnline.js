@@ -76,11 +76,13 @@ export default function PlayOnline() {
   // Responsive board sizing
   useEffect(() => {
     const updateSize = () => {
-      const padding = window.innerWidth <= 1024 ? 40 : 120; // 40px accounts for 16px page padding + 4px border
-      const verticalOffset = window.innerWidth <= 1024 ? 180 : 280;
+      // Increase padding and vertical offset on mobile to shrink the board
+      const isMobile = window.innerWidth <= 1024;
+      const padding = isMobile ? 80 : 120; // 80px means 40px space on each side
+      const verticalOffset = isMobile ? 220 : 280; // Leave more room above/below
       const maxHeight = window.innerHeight - verticalOffset;
-      const maxWidth = window.innerWidth <= 1024
-        ? window.innerWidth - padding
+      const maxWidth = isMobile
+        ? Math.min(window.innerWidth - padding, 320) // Cap mobile board at 320px
         : Math.min(window.innerWidth * 0.55, 640);
       setBoardWidth(Math.min(maxWidth, maxHeight));
     };
