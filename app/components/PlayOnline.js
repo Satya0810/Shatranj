@@ -41,7 +41,8 @@ export default function PlayOnline() {
   const [selectedTC, setSelectedTC] = useState(5); // default 10 min
   const [whiteTime, setWhiteTime] = useState(600000);
   const [blackTime, setBlackTime] = useState(600000);
-  const [drawOffered, setDrawOffered] = useState(false);
+  const [incomingDrawOffer, setIncomingDrawOffer] = useState(false);
+  const [hasSentDrawOffer, setHasSentDrawOffer] = useState(false);
   const [searchTime, setSearchTime] = useState(0);
   const socketRef = useRef(null);
   const searchIntervalRef = useRef(null);
@@ -349,8 +350,11 @@ export default function PlayOnline() {
       setPhase('gameover');
     });
 
-    socket.on('draw-offered', () => setDrawOffered(true));
-    socket.on('draw-declined', () => {});
+    socket.on('draw-offered', () => setIncomingDrawOffer(true));
+    socket.on('draw-declined', () => {
+      setHasSentDrawOffer(false);
+      alert('Opponent declined your draw offer.');
+    });
   };
 
   useEffect(() => {
@@ -609,12 +613,13 @@ export default function PlayOnline() {
   const handleOfferDraw = useCallback(() => {
     if (!gameId || !socketRef.current) return;
     socketRef.current.emit('offer-draw', { gameId });
+    setHasSentDrawOffer(true);
   }, [gameId]);
 
   const handleAcceptDraw = useCallback(() => {
     if (!gameId || !socketRef.current) return;
     socketRef.current.emit('accept-draw', { gameId });
-    setDrawOffered(false);
+    setIncomingDrawOffer(false);
   }, [gameId]);
 
   // WebRTC Setup
@@ -957,7 +962,7 @@ export default function PlayOnline() {
   const handleDeclineDraw = useCallback(() => {
     if (!gameId || !socketRef.current) return;
     socketRef.current.emit('decline-draw', { gameId });
-    setDrawOffered(false);
+    setIncomingDrawOffer(false);
   }, [gameId]);
 
   const playAgain = useCallback(() => {
@@ -968,7 +973,8 @@ export default function PlayOnline() {
     setGameResult(null);
     setOpponent(null);
     setGameId(null);
-    setDrawOffered(false);
+    setIncomingDrawOffer(false);
+    setHasSentDrawOffer(false);
     disconnectSocket();
     socketRef.current = null;
   }, []);
@@ -1434,6 +1440,7 @@ export default function PlayOnline() {
             ref={remoteVideoRef} 
             autoPlay 
             playsInline 
+            muted
             style={{ width: '100%', aspectRatio: '4/3', borderRadius: 'var(--radius-md)', objectFit: 'cover', background: '#000', display: 'block' }} 
           />
           {!remoteStream && (
@@ -1659,15 +1666,36 @@ export default function PlayOnline() {
                 </button>
               </div>
             )}
-            <button
-              className="btn btn-secondary"
-              onClick={handleOfferDraw}
-              disabled={phase !== 'playing' || drawOffered}
-              style={{ flex: '1 1 calc(50% - 4px)', opacity: (phase !== 'playing' || drawOffered) ? 0.5 : 1 }}
-              title="Offer Draw"
-            >
-              🤝 Draw
-            </button>
+            {incomingDrawOffer ? (
+              <div style={{ display: 'flex', gap: '4px', flex: '1 1 calc(50% - 4px)' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={handleAcceptDraw}
+                  style={{ flex: 1, padding: '8px 4px', fontSize: '13px' }}
+                  title="Accept Draw"
+                >
+                  ✅ Accept
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={handleDeclineDraw}
+                  style={{ flex: 1, padding: '8px 4px', fontSize: '13px' }}
+                  title="Decline Draw"
+                >
+                  ✕ Decline
+                </button>
+              </div>
+            ) : (
+              <button
+                className="btn btn-secondary"
+                onClick={handleOfferDraw}
+                disabled={phase !== 'playing' || hasSentDrawOffer}
+                style={{ flex: '1 1 calc(50% - 4px)', opacity: (phase !== 'playing' || hasSentDrawOffer) ? 0.5 : 1 }}
+                title="Offer Draw"
+              >
+                🤝 Draw
+              </button>
+            )}
             <button
               className="btn"
               onClick={handleResign}
