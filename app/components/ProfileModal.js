@@ -93,9 +93,8 @@ export default function ProfileModal({ username, onClose }) {
   if (!username) return null;
 
   return (
-    <>
-      <div className="modal-overlay" onClick={onClose} style={{ zIndex: 2000 }} />
-      <div className="modal" style={{ zIndex: 2001, maxWidth: '450px', width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 2000 }}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ zIndex: 2001, maxWidth: '450px', width: '90%', maxHeight: '90vh', overflowY: 'auto' }}>
         <button 
           className="modal-close" 
           onClick={onClose}
@@ -412,6 +411,6 @@ export default function ProfileModal({ username, onClose }) {
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }

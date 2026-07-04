@@ -45,6 +45,7 @@ export default function AnalysisBoard() {
   const [moveClassifications, setMoveClassifications] = useState({});
   const [analysisRunning, setAnalysisRunning] = useState(false);
   const [fullGameAnalysisDone, setFullGameAnalysisDone] = useState(false);
+  const [precomputedReport, setPrecomputedReport] = useState(null);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [coachFeedback, setCoachFeedback] = useState(null);
   const [coachLoading, setCoachLoading] = useState(false);
@@ -58,14 +59,12 @@ export default function AnalysisBoard() {
   // Responsive board sizing
   useEffect(() => {
     const updateSize = () => {
-      const maxHeight = window.innerHeight - 180;
-      let maxWidth;
-      if (window.innerWidth <= 1024) {
-        maxWidth = window.innerWidth - 32;
-      } else {
-        // On desktop, leave room for the side panel (min 320px) + gaps
-        maxWidth = Math.min(window.innerWidth - 420, 800);
-      }
+      const padding = window.innerWidth <= 1024 ? 32 : 120;
+      const verticalOffset = window.innerWidth <= 1024 ? 180 : 280;
+      const maxHeight = window.innerHeight - verticalOffset;
+      const maxWidth = window.innerWidth <= 1024
+        ? window.innerWidth - padding
+        : Math.min(window.innerWidth * 0.55, 640);
       setBoardWidth(Math.max(280, Math.min(maxWidth, maxHeight)));
     };
     updateSize();
@@ -365,6 +364,7 @@ export default function AnalysisBoard() {
     });
 
     let whiteAccSum = 0; let blackAccSum = 0;
+    let whiteAcplSum = 0; let blackAcplSum = 0;
     let whiteMovesCount = 0; let blackMovesCount = 0;
     for (let i = 0; i < fullHistory.length; i++) {
       const isWhiteMove = fullHistory[i].color === 'w';
@@ -375,13 +375,25 @@ export default function AnalysisBoard() {
       const wBefore = 50 + 50 * (2 / Math.PI) * Math.atan(eBefore / 290);
       const wAfter = 50 + 50 * (2 / Math.PI) * Math.atan(eAfter / 290);
       const loss = Math.max(0, wBefore - wAfter);
+      const cpl = Math.max(0, Math.min(1000, eBefore - eAfter));
       const moveAcc = Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * loss) - 3.1669));
       
-      if (isWhiteMove) { whiteAccSum += moveAcc; whiteMovesCount++; } 
-      else { blackAccSum += moveAcc; blackMovesCount++; }
+      if (isWhiteMove) { whiteAccSum += moveAcc; whiteAcplSum += cpl; whiteMovesCount++; } 
+      else { blackAccSum += moveAcc; blackAcplSum += cpl; blackMovesCount++; }
     }
     const whiteAccuracy = whiteMovesCount > 0 ? Math.round(whiteAccSum / whiteMovesCount) : 100;
     const blackAccuracy = blackMovesCount > 0 ? Math.round(blackAccSum / blackMovesCount) : 100;
+    const whiteAcpl = whiteMovesCount > 0 ? Math.round(whiteAcplSum / whiteMovesCount) : 0;
+    const blackAcpl = blackMovesCount > 0 ? Math.round(blackAcplSum / blackMovesCount) : 0;
+    
+    const whiteCounts = Object.fromEntries(categories.map(c => [c, 0]));
+    const blackCounts = Object.fromEntries(categories.map(c => [c, 0]));
+    Object.entries(classifications).forEach(([idx, c]) => {
+      if (counts[c] !== undefined) {
+        if (parseInt(idx) % 2 === 0) whiteCounts[c]++;
+        else blackCounts[c]++;
+      }
+    });
 
     // Fetch Game Summary automatically
     setSummaryLoading(true);
@@ -405,7 +417,7 @@ export default function AnalysisBoard() {
     // Save Analysis to DB if gameId is present
     if (gameId) {
       // Need token for auth
-      const token = document.cookie.split('; ').find(row => row.startsWith('token='))?.split('=')[1];
+      const token = localStorage.getItem('chess_token');
       if (token) {
         fetch(`/api/games/${gameId}/analysis`, {
           method: 'POST',
@@ -417,7 +429,11 @@ export default function AnalysisBoard() {
             analysisReport: {
               whiteAccuracy,
               blackAccuracy,
-              classifications: counts
+              whiteAcpl,
+              blackAcpl,
+              classifications: counts,
+              whiteCounts,
+              blackCounts
             }
           })
         }).catch(err => console.error("Failed to save analysis:", err));
@@ -460,18 +476,33 @@ export default function AnalysisBoard() {
     } else if (gameId) {
       // If we have a local gameId, we should fetch it if we don't already pass PGN
       // However, usually PGN is passed via searchParams or we can just fetch it here.
-      fetch(`/api/games/${gameId}`)
+      fetch(`/api/games/${gameId}`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('chess_token')}`
+        }
+      })
         .then(res => res.json())
         .then(data => {
-          if (data && data.pgn) {
+          if (data && data.error) {
+            alert('API Error: ' + data.error);
+          } else if (data && data.pgn) {
             setPgnInput(data.pgn);
-            loadPgn(data.pgn);
-            if (autoAnalyzeParam === 'true') {
+            try {
+              loadPgn(data.pgn);
+            } catch(e) {
+              alert('Load PGN Error: ' + e.message);
+            }
+            if (data.analysisReport) {
+              setPrecomputedReport(data.analysisReport);
+            }
+            if (autoAnalyzeParam === 'true' || data.analysisReport) {
               setShouldAutoAnalyze(true);
             }
+          } else {
+            alert('No PGN found in data: ' + JSON.stringify(Object.keys(data || {})));
           }
         })
-        .catch(err => console.error("Failed to fetch local game:", err));
+        .catch(err => alert("Failed to fetch local game: " + err.message));
     }
   }, [searchParams, loadPgn]);
 
@@ -843,88 +874,95 @@ export default function AnalysisBoard() {
           <CoachFeedback feedback={coachFeedback} loading={coachLoading} />
         )}
 
-        {/* Evaluation summary when full analysis is done */}
-        {fullGameAnalysisDone && (
+        {/* Evaluation summary when full analysis is done or precomputed */}
+        {(fullGameAnalysisDone || precomputedReport) && (
           <div className="card" id="analysis-summary">
             <div className="card-header">
-              <span className="card-title">Analysis Summary</span>
+              <span className="card-title">
+                Analysis Summary
+                {!fullGameAnalysisDone && (
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '12px', fontWeight: 'normal' }}>
+                    (Generating detailed annotations...)
+                  </span>
+                )}
+              </span>
             </div>
             <div className="card-body">
               {(() => {
                 const categories = ['brilliant', 'great', 'best', 'excellent', 'good', 'book', 'inaccuracy', 'mistake', 'miss', 'blunder'];
-                const counts = Object.fromEntries(categories.map(c => [c, 0]));
-                const whiteCounts = Object.fromEntries(categories.map(c => [c, 0]));
-                const blackCounts = Object.fromEntries(categories.map(c => [c, 0]));
+                let counts = Object.fromEntries(categories.map(c => [c, 0]));
+                let whiteCounts = Object.fromEntries(categories.map(c => [c, '-']));
+                let blackCounts = Object.fromEntries(categories.map(c => [c, '-']));
                 
-                Object.entries(moveClassifications).forEach(([idx, c]) => {
-                  if (counts[c] !== undefined) {
-                    counts[c]++;
-                    if (parseInt(idx) % 2 === 0) whiteCounts[c]++;
-                    else blackCounts[c]++;
-                  }
-                });
+                let whiteAccuracy = 100;
+                let blackAccuracy = 100;
+                let whiteAcpl = 0;
+                let blackAcpl = 0;
 
-                let whiteAccSum = 0;
-                let blackAccSum = 0;
-                let whiteAcplSum = 0;
-                let blackAcplSum = 0;
-                let whiteMovesCount = 0;
-                let blackMovesCount = 0;
-
-                for (let i = 0; i < fullHistory.length; i++) {
-                  const isWhiteMove = fullHistory[i].color === 'w';
-                  const prevEval = i > 0 ? (moveEvals[i - 1] || 0) : 30;
-                  const absEval = moveEvals[i] || 0;
-
-                  // Evaluations from the perspective of the player making the move
-                  const eBefore = isWhiteMove ? prevEval : -prevEval;
-                  const eAfter = isWhiteMove ? absEval : -absEval;
-
-                  // Lichess Win Probability formula
-                  const wBefore = 50 + 50 * (2 / Math.PI) * Math.atan(eBefore / 290);
-                  const wAfter = 50 + 50 * (2 / Math.PI) * Math.atan(eAfter / 290);
+                if (fullGameAnalysisDone) {
+                  whiteCounts = Object.fromEntries(categories.map(c => [c, 0]));
+                  blackCounts = Object.fromEntries(categories.map(c => [c, 0]));
                   
-                  // Loss in win probability
-                  const loss = Math.max(0, wBefore - wAfter);
+                  Object.entries(moveClassifications).forEach(([idx, c]) => {
+                    if (counts[c] !== undefined) {
+                      counts[c]++;
+                      if (parseInt(idx) % 2 === 0) whiteCounts[c]++;
+                      else blackCounts[c]++;
+                    }
+                  });
 
-                  // Centipawn loss (cap at 1000 to prevent a single blunder from destroying everything)
-                  const cpl = Math.max(0, Math.min(1000, eBefore - eAfter));
+                  let whiteAccSum = 0, blackAccSum = 0;
+                  let whiteAcplSum = 0, blackAcplSum = 0;
+                  let whiteMovesCount = 0, blackMovesCount = 0;
 
-                  // Lichess Move Accuracy formula
-                  const moveAcc = Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * loss) - 3.1669));
+                  for (let i = 0; i < fullHistory.length; i++) {
+                    const isWhiteMove = fullHistory[i].color === 'w';
+                    const prevEval = i > 0 ? (moveEvals[i - 1] || 0) : 30;
+                    const absEval = moveEvals[i] || 0;
+                    const eBefore = isWhiteMove ? prevEval : -prevEval;
+                    const eAfter = isWhiteMove ? absEval : -absEval;
+                    const wBefore = 50 + 50 * (2 / Math.PI) * Math.atan(eBefore / 290);
+                    const wAfter = 50 + 50 * (2 / Math.PI) * Math.atan(eAfter / 290);
+                    const loss = Math.max(0, wBefore - wAfter);
+                    const cpl = Math.max(0, Math.min(1000, eBefore - eAfter));
+                    const moveAcc = Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * loss) - 3.1669));
 
-                  if (isWhiteMove) {
-                    whiteAccSum += moveAcc;
-                    whiteAcplSum += cpl;
-                    whiteMovesCount++;
-                  } else {
-                    blackAccSum += moveAcc;
-                    blackAcplSum += cpl;
-                    blackMovesCount++;
+                    if (isWhiteMove) {
+                      whiteAccSum += moveAcc; whiteAcplSum += cpl; whiteMovesCount++;
+                    } else {
+                      blackAccSum += moveAcc; blackAcplSum += cpl; blackMovesCount++;
+                    }
                   }
+
+                  whiteAccuracy = whiteMovesCount > 0 ? Math.round(whiteAccSum / whiteMovesCount) : 100;
+                  blackAccuracy = blackMovesCount > 0 ? Math.round(blackAccSum / blackMovesCount) : 100;
+                  whiteAcpl = whiteMovesCount > 0 ? Math.round(whiteAcplSum / whiteMovesCount) : 0;
+                  blackAcpl = blackMovesCount > 0 ? Math.round(blackAcplSum / blackMovesCount) : 0;
+                } else if (precomputedReport) {
+                  whiteAccuracy = precomputedReport.whiteAccuracy || 100;
+                  blackAccuracy = precomputedReport.blackAccuracy || 100;
+                  counts = precomputedReport.classifications || counts;
+                  // acpl remains undefined if not present, which is correctly handled by getEstimatedElo
+                  whiteAcpl = precomputedReport.whiteAcpl;
+                  blackAcpl = precomputedReport.blackAcpl;
+                  whiteCounts = precomputedReport.whiteCounts || whiteCounts;
+                  blackCounts = precomputedReport.blackCounts || blackCounts;
                 }
 
-                const whiteAccuracy = whiteMovesCount > 0 ? Math.round(whiteAccSum / whiteMovesCount) : 100;
-                const blackAccuracy = blackMovesCount > 0 ? Math.round(blackAccSum / blackMovesCount) : 100;
-                
-                const whiteAcpl = whiteMovesCount > 0 ? Math.round(whiteAcplSum / whiteMovesCount) : 0;
-                const blackAcpl = blackMovesCount > 0 ? Math.round(blackAcplSum / blackMovesCount) : 0;
-
                 const getEstimatedElo = (acc, acpl) => {
-                  // Accuracy-based ELO estimation (Quadratic curve based on CAPS statistics)
                   let eloAcc = 400;
                   if (acc >= 50) {
                     eloAcc = 400 + 2800 * Math.pow((acc - 50) / 50, 2);
                   } else {
                     eloAcc = 100 + (acc / 50) * 300;
                   }
-
-                  // ACPL-based ELO estimation (Exponential curve based on centipawn loss research)
-                  const eloAcpl = 3200 * Math.exp(-0.015 * acpl);
-
-                  // Blend them together for a highly robust "Game Rating"
-                  let finalElo = Math.round((eloAcc + eloAcpl) / 2);
                   
+                  if (acpl === undefined || acpl === null) {
+                    return Math.max(100, Math.min(3200, Math.round(eloAcc)));
+                  }
+
+                  const eloAcpl = 3200 * Math.exp(-0.015 * acpl);
+                  let finalElo = Math.round((eloAcc + eloAcpl) / 2);
                   return Math.max(100, Math.min(3200, finalElo));
                 };
 

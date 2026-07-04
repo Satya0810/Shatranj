@@ -74,12 +74,17 @@ export default function AuthModal() {
           body: JSON.stringify({ field: 'username', value: username }),
         });
         const data = await res.json();
-        if (data.available) {
-          setUsernameStatus('valid');
-          setUsernameMsg('Available');
+        if (res.ok) {
+          if (data.available) {
+            setUsernameStatus('valid');
+            setUsernameMsg('Available');
+          } else {
+            setUsernameStatus('invalid');
+            setUsernameMsg('Username is taken');
+          }
         } else {
           setUsernameStatus('invalid');
-          setUsernameMsg('Username is taken');
+          setUsernameMsg('Error checking availability');
         }
       } catch (err) {
         setUsernameStatus('invalid');
@@ -120,12 +125,17 @@ export default function AuthModal() {
           body: JSON.stringify({ field: 'email', value: email }),
         });
         const data = await res.json();
-        if (data.available) {
-          setEmailStatus('valid');
-          setEmailMsg('Email available');
+        if (res.ok) {
+          if (data.available) {
+            setEmailStatus('valid');
+            setEmailMsg('Email available');
+          } else {
+            setEmailStatus('invalid');
+            setEmailMsg('Email already registered');
+          }
         } else {
           setEmailStatus('invalid');
-          setEmailMsg('Email already registered');
+          setEmailMsg('Error checking email');
         }
       } catch (err) {
         setEmailStatus('invalid');

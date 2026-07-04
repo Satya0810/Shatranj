@@ -204,7 +204,6 @@ export default function HistoryPage() {
                   <tr>
                     <th>Players</th>
                     <th>Result</th>
-                    <th>Accuracy</th>
                     <th>Platform</th>
                     <th>Date</th>
                     <th style={{ textAlign: 'right' }}>Actions</th>
@@ -214,8 +213,14 @@ export default function HistoryPage() {
                   {games.map(game => {
                     const whiteName = game.whitePlayer ? game.whitePlayer.username : (game.externalWhite || 'Unknown');
                     const blackName = game.blackPlayer ? game.blackPlayer.username : (game.externalBlack || 'Unknown');
-                    const isWhite = game.whitePlayer && game.whitePlayer._id === user.id;
-                    const isBlack = game.blackPlayer && game.blackPlayer._id === user.id;
+                    
+                    const isWhite = (game.whitePlayer && game.whitePlayer._id === user.id) || 
+                                    (game.platform === 'chess.com' && user.chesscomUsername && whiteName.toLowerCase() === user.chesscomUsername.toLowerCase()) ||
+                                    (game.platform === 'lichess' && user.lichessUsername && whiteName.toLowerCase() === user.lichessUsername.toLowerCase());
+                    
+                    const isBlack = (game.blackPlayer && game.blackPlayer._id === user.id) || 
+                                    (game.platform === 'chess.com' && user.chesscomUsername && blackName.toLowerCase() === user.chesscomUsername.toLowerCase()) ||
+                                    (game.platform === 'lichess' && user.lichessUsername && blackName.toLowerCase() === user.lichessUsername.toLowerCase());
                     
                     let resultText = game.result;
                     let resultColor = 'var(--text-secondary)';
@@ -254,15 +259,6 @@ export default function HistoryPage() {
                           </span>
                         </td>
                         <td>
-                          {myAcc !== null ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 10px', background: 'rgba(129, 182, 74, 0.1)', color: 'var(--accent-green)', borderRadius: 'var(--radius-full)', fontSize: '13px', fontWeight: '600' }}>
-                              🎯 {myAcc}%
-                            </span>
-                          ) : (
-                            <span style={{ color: 'var(--border-medium)', paddingLeft: '14px' }}>—</span>
-                          )}
-                        </td>
-                        <td>
                           <span className={`platform-badge ${platformClass}`}>
                             {game.platform}
                           </span>
@@ -273,10 +269,10 @@ export default function HistoryPage() {
                         <td style={{ textAlign: 'right' }}>
                           <button 
                             className="btn btn-secondary"
-                            onClick={() => router.push(`/analyze?gameId=${game._id}`)}
-                            style={{ padding: '8px 16px', fontSize: '13px', borderRadius: 'var(--radius-full)', background: 'var(--bg-dark)' }}
+                            onClick={() => router.push(`/analyze?gameId=${game._id}&orientation=${isBlack ? 'black' : 'white'}${myAcc !== null ? '&autoAnalyze=true' : ''}`)}
+                            style={{ padding: '8px 16px', fontSize: '13px', borderRadius: 'var(--radius-full)', background: myAcc !== null ? 'rgba(129, 182, 74, 0.1)' : 'var(--bg-dark)', color: myAcc !== null ? 'var(--accent-green)' : 'inherit', border: myAcc !== null ? '1px solid rgba(129, 182, 74, 0.3)' : '1px solid var(--border-subtle)' }}
                           >
-                            🔍 Analyze
+                            {myAcc !== null ? `🎯 ${myAcc}% - Review` : '🔍 Analyze'}
                           </button>
                         </td>
                       </tr>

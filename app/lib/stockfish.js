@@ -23,6 +23,7 @@ export default class StockfishEngine {
   async init() {
     // Try multiple Stockfish sources
     const sources = [
+      '/stockfish.js',
       'https://cdn.jsdelivr.net/npm/stockfish.js@10.0.2/stockfish.js',
       'https://unpkg.com/stockfish.js@10.0.2/stockfish.js',
       'https://cdn.jsdelivr.net/npm/stockfish.wasm@0.10.0/stockfish.js',

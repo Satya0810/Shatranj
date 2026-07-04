@@ -32,6 +32,8 @@ export async function GET(req) {
         wins: user.wins,
         losses: user.losses,
         draws: user.draws,
+        chesscomUsername: user.chesscomUsername,
+        lichessUsername: user.lichessUsername,
       }
     });
 

@@ -7,6 +7,7 @@ import MoveList from './MoveList';
 import GameOverModal from './GameOverModal';
 import { useAuth } from './AuthContext';
 import ProfileModal from './ProfileModal';
+import { useRouter } from 'next/navigation';
 import { getSocket, disconnectSocket } from '../lib/socket';
 
 const TIME_CONTROLS = [
@@ -22,6 +23,7 @@ const TIME_CONTROLS = [
 ];
 
 export default function PlayOnline() {
+  const router = useRouter();
   const { user, token, openAuthModal } = useAuth();
   const [phase, setPhase] = useState('setup'); // 'setup' | 'searching' | 'playing' | 'gameover'
   const [game, setGame] = useState(new Chess());
@@ -45,11 +47,34 @@ export default function PlayOnline() {
   const clockIntervalRef = useRef(null);
   const lastMoveTimeRef = useRef(null);
 
+  // WebRTC and Chat State
+  const [activeTab, setActiveTab] = useState('moves'); // 'moves' | 'chat'
+  const activeTabRef = useRef(activeTab);
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+    if (activeTab === 'chat') {
+      setHasUnreadMessages(false);
+    }
+  }, [activeTab]);
+  const [chatInput, setChatInput] = useState('');
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  const [isAudioEnabled, setIsAudioEnabled] = useState(true);
+  const [remoteStream, setRemoteStream] = useState(null);
+  const [showVideoSection, setShowVideoSection] = useState(false);
+
   // Responsive board sizing
   useEffect(() => {
     const updateSize = () => {
       const padding = window.innerWidth <= 1024 ? 32 : 120;
-      const maxHeight = window.innerHeight - 180;
+      const verticalOffset = window.innerWidth <= 1024 ? 180 : 280;
+      const maxHeight = window.innerHeight - verticalOffset;
       const maxWidth = window.innerWidth <= 1024
         ? window.innerWidth - padding
         : Math.min(window.innerWidth * 0.55, 640);
@@ -65,6 +90,12 @@ export default function PlayOnline() {
     return () => {
       if (searchIntervalRef.current) clearInterval(searchIntervalRef.current);
       if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => t.stop());
+      }
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+      }
       disconnectSocket();
     };
   }, []);
@@ -250,6 +281,116 @@ export default function PlayOnline() {
     setDrawOffered(false);
   }, [gameId]);
 
+  // WebRTC Setup
+  const initializeWebRTC = useCallback(async (isInitiator) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStreamRef.current = stream;
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+      peerConnectionRef.current = pc;
+
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+      pc.ontrack = (event) => {
+        setRemoteStream(event.streams[0]);
+        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = event.streams[0];
+      };
+
+      pc.onicecandidate = (event) => {
+        if (event.candidate && socketRef.current && gameId) {
+          socketRef.current.emit('webrtc-ice-candidate', { gameId, candidate: event.candidate });
+        }
+      };
+
+      if (isInitiator) {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socketRef.current.emit('webrtc-offer', { gameId, offer });
+      }
+    } catch (err) {
+      console.warn("Could not access camera/mic:", err);
+    }
+  }, [gameId]);
+
+  useEffect(() => {
+    if (phase === 'playing' && gameId && !peerConnectionRef.current) {
+      initializeWebRTC(orientation === 'white');
+    }
+  }, [phase, gameId, orientation, initializeWebRTC]);
+
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket || !gameId) return;
+
+    const handleChat = (data) => {
+      setChatMessages(prev => [...prev, data]);
+      if (activeTabRef.current !== 'chat') {
+        setHasUnreadMessages(true);
+      }
+    };
+    const handleOffer = async (data) => {
+      const pc = peerConnectionRef.current;
+      if (!pc) return;
+      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit('webrtc-answer', { gameId, answer });
+    };
+    const handleAnswer = async (data) => {
+      const pc = peerConnectionRef.current;
+      if (!pc) return;
+      await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+    };
+    const handleIce = async (data) => {
+      const pc = peerConnectionRef.current;
+      if (!pc) return;
+      try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch(e) { console.error(e) }
+    };
+
+    socket.on('chat-message', handleChat);
+    socket.on('webrtc-offer', handleOffer);
+    socket.on('webrtc-answer', handleAnswer);
+    socket.on('webrtc-ice-candidate', handleIce);
+
+    return () => {
+      socket.off('chat-message', handleChat);
+      socket.off('webrtc-offer', handleOffer);
+      socket.off('webrtc-answer', handleAnswer);
+      socket.off('webrtc-ice-candidate', handleIce);
+    };
+  }, [gameId]);
+
+  const toggleVideo = () => {
+    if (localStreamRef.current) {
+      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsVideoEnabled(videoTrack.enabled);
+      }
+    }
+  };
+
+  const toggleAudio = () => {
+    if (localStreamRef.current) {
+      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsAudioEnabled(audioTrack.enabled);
+      }
+    }
+  };
+
+  const sendChatMessage = (e) => {
+    e.preventDefault();
+    if (!chatInput.trim() || !gameId || !socketRef.current) return;
+    const msg = chatInput.trim();
+    socketRef.current.emit('chat-message', { gameId, message: msg, sender: user?.username || 'Guest' });
+    setChatMessages(prev => [...prev, { message: msg, sender: 'You' }]);
+    setChatInput('');
+  };
+
   const handleDeclineDraw = useCallback(() => {
     if (!gameId || !socketRef.current) return;
     socketRef.current.emit('decline-draw', { gameId });
@@ -430,6 +571,41 @@ export default function PlayOnline() {
   // PLAYING PHASE
   return (
     <div className="play-layout" id="play-online-layout">
+      {/* Video Section */}
+      <div className="video-section" style={{ display: showVideoSection ? 'flex' : 'none', flexDirection: 'column', gap: 'var(--space-md)', width: '240px', flexShrink: 0 }}>
+        <div className="card" style={{ padding: 'var(--space-sm)' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 600 }}>Opponent Video</div>
+          <video 
+            ref={remoteVideoRef} 
+            autoPlay 
+            playsInline 
+            style={{ width: '100%', aspectRatio: '4/3', borderRadius: 'var(--radius-md)', objectFit: 'cover', background: '#000', display: remoteStream ? 'block' : 'none' }} 
+          />
+          {!remoteStream && (
+            <div style={{ width: '100%', aspectRatio: '4/3', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Waiting for opponent...</div>
+          )}
+        </div>
+        <div className="card" style={{ padding: 'var(--space-sm)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+            <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>Your Video</div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={toggleAudio} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: isAudioEnabled ? 1 : 0.5, fontSize: '14px' }} title="Toggle Audio">{isAudioEnabled ? '🎙️' : '🔇'}</button>
+              <button onClick={toggleVideo} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: isVideoEnabled ? 1 : 0.5, fontSize: '14px' }} title="Toggle Video">{isVideoEnabled ? '📹' : '🚫'}</button>
+            </div>
+          </div>
+          <video 
+            ref={localVideoRef} 
+            autoPlay 
+            muted 
+            playsInline 
+            style={{ width: '100%', aspectRatio: '4/3', borderRadius: 'var(--radius-md)', objectFit: 'cover', background: '#000', display: localStreamRef.current ? 'block' : 'none' }} 
+          />
+          {!localStreamRef.current && (
+            <div style={{ width: '100%', aspectRatio: '4/3', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Camera off</div>
+          )}
+        </div>
+      </div>
+
       <div className="board-section">
         {/* Opponent info bar */}
         <div style={{
@@ -442,13 +618,15 @@ export default function PlayOnline() {
           marginBottom: 'var(--space-sm)',
           border: '1px solid var(--border-subtle)',
         }}>
-          <div 
-            style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', cursor: opponent?.username ? 'pointer' : 'default' }}
-            onClick={() => opponent?.username && setShowProfileUsername(opponent.username)}
-          >
-            <span style={{ fontSize: '20px' }}>👤</span>
-            <span style={{ fontWeight: 600 }}>{opponent?.username || 'Opponent'}</span>
-            <span className="badge badge-gold" style={{ fontSize: '11px' }}>{opponent?.rating || '?'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+            <div 
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', cursor: opponent?.username ? 'pointer' : 'default' }}
+              onClick={() => opponent?.username && setShowProfileUsername(opponent.username)}
+            >
+              <span style={{ fontSize: '20px' }}>👤</span>
+              <span style={{ fontWeight: 600 }}>{opponent?.username || 'Opponent'}</span>
+              <span className="badge badge-gold" style={{ fontSize: '11px' }}>{opponent?.rating || '?'}</span>
+            </div>
           </div>
           <div style={{
             fontFamily: 'var(--font-mono)',
@@ -485,13 +663,15 @@ export default function PlayOnline() {
           marginTop: 'var(--space-sm)',
           border: '1px solid var(--border-subtle)',
         }}>
-          <div 
-            style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', cursor: user?.username ? 'pointer' : 'default' }}
-            onClick={() => user?.username && setShowProfileUsername(user.username)}
-          >
-            <span style={{ fontSize: '20px' }}>👤</span>
-            <span style={{ fontWeight: 600 }}>{user?.username || 'You'}</span>
-            <span className="badge badge-green" style={{ fontSize: '11px' }}>{user?.rating || '?'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+            <div 
+              style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', cursor: user?.username ? 'pointer' : 'default' }}
+              onClick={() => user?.username && setShowProfileUsername(user.username)}
+            >
+              <span style={{ fontSize: '20px' }}>👤</span>
+              <span style={{ fontWeight: 600 }}>{user?.username || 'You'}</span>
+              <span className="badge badge-green" style={{ fontSize: '11px' }}>{user?.rating || '?'}</span>
+            </div>
           </div>
           <div style={{
             fontFamily: 'var(--font-mono)',
@@ -510,17 +690,62 @@ export default function PlayOnline() {
       </div>
 
       <div className="game-panel">
-        {/* Move List */}
-        <div className="card" style={{ flex: 1 }}>
-          <div className="card-header">
-            <span className="card-title">Moves</span>
-            <span className="badge badge-blue">Online</span>
+        {/* Tabs for Moves and Chat */}
+        <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          <div className="card-header" style={{ padding: '0', display: 'flex', borderBottom: '1px solid var(--border-color)' }}>
+            <button 
+              onClick={() => setActiveTab('moves')}
+              style={{ flex: 1, padding: '12px', background: activeTab === 'moves' ? 'var(--bg-surface)' : 'transparent', border: 'none', color: activeTab === 'moves' ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: 600, cursor: 'pointer' }}
+            >Moves</button>
+            <button 
+              onClick={() => setActiveTab('chat')}
+              style={{ flex: 1, padding: '12px', background: activeTab === 'chat' ? 'var(--bg-surface)' : 'transparent', border: 'none', color: activeTab === 'chat' ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+            >
+              Chat
+              {hasUnreadMessages && (
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-red)' }} title="New message" />
+              )}
+            </button>
           </div>
-          <MoveList
-            history={history}
-            currentMoveIndex={currentMoveIndex}
-            onSelectMove={() => {}}
-          />
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            {activeTab === 'moves' ? (
+              <MoveList
+                history={history}
+                currentMoveIndex={currentMoveIndex}
+                onSelectMove={() => {}}
+              />
+            ) : (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
+                <div style={{ flex: 1, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {chatMessages.length === 0 && <div style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '20px' }}>No messages yet</div>}
+                  {chatMessages.map((msg, idx) => (
+                    <div key={idx} style={{ 
+                      alignSelf: msg.sender === 'You' ? 'flex-end' : 'flex-start',
+                      background: msg.sender === 'You' ? 'var(--accent-green)' : 'var(--bg-surface-hover)',
+                      color: msg.sender === 'You' ? 'white' : 'var(--text-primary)',
+                      padding: '8px 12px',
+                      borderRadius: '12px',
+                      maxWidth: '80%',
+                      wordBreak: 'break-word'
+                    }}>
+                      <div style={{ fontSize: '10px', opacity: 0.7, marginBottom: '2px' }}>{msg.sender}</div>
+                      <div style={{ fontSize: '13px' }}>{msg.message}</div>
+                    </div>
+                  ))}
+                </div>
+                <form onSubmit={sendChatMessage} style={{ display: 'flex', padding: '12px', borderTop: '1px solid var(--border-color)', gap: '8px' }}>
+                  <input 
+                    type="text" 
+                    value={chatInput} 
+                    onChange={e => setChatInput(e.target.value)} 
+                    placeholder="Type a message..." 
+                    style={{ flex: 1, padding: '8px 12px', borderRadius: '20px', border: '1px solid var(--border-color)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+                  />
+                  <button type="submit" style={{ background: 'var(--accent-green)', color: 'white', border: 'none', borderRadius: '50%', width: '32px', height: '32px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>↑</button>
+                </form>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Draw offer notification */}
@@ -548,6 +773,14 @@ export default function PlayOnline() {
         {/* Controls */}
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+            <button
+              className={`btn ${showVideoSection ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setShowVideoSection(!showVideoSection)}
+              style={{ flex: 1 }}
+              title="Toggle Video Chat"
+            >
+              📹 Video
+            </button>
             <button
               className="btn btn-secondary"
               onClick={handleOfferDraw}
@@ -577,10 +810,16 @@ export default function PlayOnline() {
       {gameResult && (
         <GameOverModal
           result={gameResult}
-          history={history}
-          playerColor={orientation}
           onNewGame={playAgain}
-          onAnalyze={() => {}}
+          onAnalyze={() => {
+            const replayGame = new Chess();
+            for (const move of history) {
+              replayGame.move(move.san || move);
+            }
+            const pgn = replayGame.pgn();
+            router.push(`/analyze?pgn=${encodeURIComponent(pgn)}&autoAnalyze=true`);
+          }}
+          onClose={() => setGameResult(null)}
         />
       )}
 

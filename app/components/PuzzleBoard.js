@@ -52,9 +52,10 @@ export default function PuzzleBoard() {
   useEffect(() => {
     const updateSize = () => {
       const padding = window.innerWidth <= 1024 ? 32 : 120;
-      const maxHeight = window.innerHeight - 180;
-      const maxWidth = window.innerWidth <= 1024 
-        ? window.innerWidth - padding 
+      const verticalOffset = window.innerWidth <= 1024 ? 180 : 280;
+      const maxHeight = window.innerHeight - verticalOffset;
+      const maxWidth = window.innerWidth <= 1024
+        ? window.innerWidth - padding
         : Math.min(window.innerWidth * 0.55, 640);
         
       setBoardWidth(Math.min(maxWidth, maxHeight));

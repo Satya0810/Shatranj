@@ -331,6 +331,39 @@ app.prepare().then(() => {
       io.to(opponentSocketId).emit('draw-declined');
     });
 
+    // Chat and WebRTC Signaling
+    socket.on('chat-message', (data) => {
+      const { gameId, message, sender } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+      const opponentSocketId = socket.id === game.white.socketId ? game.black.socketId : game.white.socketId;
+      io.to(opponentSocketId).emit('chat-message', { message, sender });
+    });
+
+    socket.on('webrtc-offer', (data) => {
+      const { gameId, offer } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+      const opponentSocketId = socket.id === game.white.socketId ? game.black.socketId : game.white.socketId;
+      io.to(opponentSocketId).emit('webrtc-offer', { offer });
+    });
+
+    socket.on('webrtc-answer', (data) => {
+      const { gameId, answer } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+      const opponentSocketId = socket.id === game.white.socketId ? game.black.socketId : game.white.socketId;
+      io.to(opponentSocketId).emit('webrtc-answer', { answer });
+    });
+
+    socket.on('webrtc-ice-candidate', (data) => {
+      const { gameId, candidate } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+      const opponentSocketId = socket.id === game.white.socketId ? game.black.socketId : game.white.socketId;
+      io.to(opponentSocketId).emit('webrtc-ice-candidate', { candidate });
+    });
+
     // Disconnect
     socket.on('disconnect', () => {
       console.log(`Player disconnected: ${socket.id}`);

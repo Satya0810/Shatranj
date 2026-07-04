@@ -379,6 +379,10 @@ img {
 
 .mobile-menu-btn {
   display: none;
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  z-index: 101;
   width: 36px;
   height: 36px;
   border-radius: var(--radius-md);
@@ -762,12 +766,20 @@ textarea.input {
   gap: var(--space-md);
 }
 
+.board-container-wrapper {
+  display: flex;
+  flex-direction: row;
+  gap: 0;
+  align-items: stretch;
+}
+
 .board-container {
   position: relative;
   border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: var(--shadow-lg);
   border: 3px solid var(--border-medium);
+  touch-action: none;
 }
 
 .player-info {
@@ -1478,12 +1490,17 @@ textarea.input {
     width: 100%;
   }
 
-  .eval-bar-container .eval-bar {
+  .board-container-wrapper {
+    flex-direction: column;
+  }
+
+  .eval-bar-container {
     display: none;
   }
 
   .eval-bar-horizontal {
     display: block;
+    margin-bottom: var(--space-sm);
   }
 }
 

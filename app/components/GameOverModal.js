@@ -51,6 +51,11 @@ export default function GameOverModal({ result, onNewGame, onAnalyze, onClose })
           <button className="btn btn-secondary" onClick={onAnalyze} id="btn-analyze-game">
             📊 Analyze
           </button>
+          {onClose && (
+            <button className="btn btn-secondary" onClick={onClose} id="btn-close-modal">
+              ✖️ Close
+            </button>
+          )}
         </div>
       </div>
     </div>

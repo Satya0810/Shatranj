@@ -49,6 +49,8 @@ export async function POST(req) {
         wins: user.wins,
         losses: user.losses,
         draws: user.draws,
+        chesscomUsername: user.chesscomUsername,
+        lichessUsername: user.lichessUsername,
       }
     });
 

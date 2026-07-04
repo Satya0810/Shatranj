@@ -59,6 +59,10 @@ const GameSchema = new mongoose.Schema({
   },
   analysisReport: {
     type: Object, // Will store { whiteAccuracy, blackAccuracy, classifications }
+  },
+  platformGameId: {
+    type: String, // Unique ID from chess.com or lichess to prevent duplicates
+    index: true,
   }
 }, {
   timestamps: true,

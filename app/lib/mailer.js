@@ -17,27 +17,20 @@ async function initTransporter() {
         pass: process.env.SMTP_PASS,
       },
     });
-  } else {
-    // Generate a test account on the fly using Ethereal (fake SMTP service for developers)
-    console.log('No SMTP credentials found. Generating Ethereal test account...');
-    let testAccount = await nodemailer.createTestAccount();
-    
-    transporter = nodemailer.createTransport({
-      host: "smtp.ethereal.email",
-      port: 587,
-      secure: false,
-      auth: {
-        user: testAccount.user,
-        pass: testAccount.pass,
-      },
-    });
+    return transporter;
   }
 
-  return transporter;
+  console.log('No SMTP credentials found. Skipping real email sending.');
+  return null;
 }
 
 export async function sendVerificationEmail(to, otp) {
   const mailer = await initTransporter();
+
+  if (!mailer) {
+    console.log('✉️ MOCK EMAIL SENT (Verification OTP):', otp);
+    return { mock: true, otp };
+  }
 
   const info = await mailer.sendMail({
     from: '"ChessMaster" <noreply@chessmaster.local>',
@@ -56,19 +49,16 @@ export async function sendVerificationEmail(to, otp) {
     `,
   });
 
-  // If using Ethereal, log the preview URL so the developer can see the email in their console!
-  if (info.messageId && info.response.includes('ethereal')) {
-    console.log('----------------------------------------------------');
-    console.log('✉️ TEST EMAIL SENT (Verification OTP):', otp);
-    console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
-    console.log('----------------------------------------------------');
-  }
-
   return info;
 }
 
 export async function sendPasswordResetEmail(to, otp) {
   const mailer = await initTransporter();
+
+  if (!mailer) {
+    console.log('✉️ MOCK EMAIL SENT (Password Reset OTP):', otp);
+    return { mock: true, otp };
+  }
 
   const info = await mailer.sendMail({
     from: '"ChessMaster" <noreply@chessmaster.local>',
@@ -86,13 +76,6 @@ export async function sendPasswordResetEmail(to, otp) {
       </div>
     `,
   });
-
-  if (info.messageId && info.response.includes('ethereal')) {
-    console.log('----------------------------------------------------');
-    console.log('✉️ TEST EMAIL SENT (Password Reset OTP):', otp);
-    console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
-    console.log('----------------------------------------------------');
-  }
 
   return info;
 }

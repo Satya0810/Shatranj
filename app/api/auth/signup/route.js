@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '../../../lib/mongodb';
 import User from '../../../models/User';
-import { hashPassword } from '../../../lib/auth';
+import { hashPassword, signToken } from '../../../lib/auth';
 import { sendVerificationEmail } from '../../../lib/mailer';
 
 export async function POST(req) {
@@ -63,7 +63,30 @@ export async function POST(req) {
     });
 
     // Send verification email
-    await sendVerificationEmail(email, otp);
+    const emailResult = await sendVerificationEmail(email, otp);
+
+    if (emailResult && emailResult.mock) {
+      user.isVerified = true;
+      await user.save();
+      const token = signToken(user._id);
+      return NextResponse.json({
+        requires_verification: false,
+        message: 'Signup successful. Email verification bypassed (no SMTP).',
+        token,
+        user: {
+          id: user._id,
+          username: user.username,
+          email: user.email,
+          rating: user.rating,
+          gamesPlayed: user.gamesPlayed,
+          wins: user.wins,
+          losses: user.losses,
+          draws: user.draws,
+          chesscomUsername: user.chesscomUsername,
+          lichessUsername: user.lichessUsername,
+        }
+      }, { status: 201 });
+    }
 
     return NextResponse.json({
       requires_verification: true,
