@@ -734,6 +734,10 @@ export default function PlayOnline() {
       
       if (isInitiator && peerConnectionRef.current) {
         try {
+          peerConnectionRef.current.addTransceiver('audio', { direction: 'recvonly' });
+          if (withVideo) {
+            peerConnectionRef.current.addTransceiver('video', { direction: 'recvonly' });
+          }
           const offer = await peerConnectionRef.current.createOffer();
           await peerConnectionRef.current.setLocalDescription(offer);
           socketRef.current.emit('webrtc-offer', { gameId, offer });
