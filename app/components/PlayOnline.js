@@ -206,6 +206,22 @@ export default function PlayOnline() {
       setWhiteTime(data.whiteTime);
       setBlackTime(data.blackTime);
 
+      // Automatically hang up any active calls when the game ends
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+      setCallStatus('idle');
+      setShowVideoSection(false);
+      
       let result;
       if (data.winner === null) {
         result = { result: 'draw', winner: null };
