@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { getSocket, disconnectSocket } from '../lib/socket';
 
 const AuthContext = createContext(null);
 
@@ -9,6 +10,8 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [globalChallenge, setGlobalChallenge] = useState(null); // incoming challenge from any page
+  const globalSocketRef = useRef(null);
 
   // Restore session on mount
   useEffect(() => {
@@ -36,6 +39,48 @@ export function AuthProvider({ children }) {
       setLoading(false);
     }
   }, []);
+
+  // Global socket: register all authenticated users so they are discoverable on the network
+  useEffect(() => {
+    if (user && !globalSocketRef.current) {
+      const socket = getSocket();
+      globalSocketRef.current = socket;
+      socket.emit('auth', { userId: user.id, username: user.username, rating: user.rating });
+
+      // Listen for incoming challenges even if user is NOT on the Play Online page
+      socket.on('incoming-challenge', (data) => {
+        setGlobalChallenge(data.challenger);
+      });
+
+      socket.on('incoming-map-challenge', (data) => {
+        setGlobalChallenge(data.challenger);
+      });
+    }
+
+    return () => {
+      // Don't disconnect on cleanup — the PlayOnline component manages the socket lifecycle
+    };
+  }, [user]);
+
+  const dismissGlobalChallenge = useCallback(() => {
+    setGlobalChallenge(null);
+  }, []);
+
+  const acceptGlobalChallenge = useCallback(() => {
+    const socket = globalSocketRef.current;
+    if (socket && globalChallenge) {
+      socket.emit('accept-nearby-challenge', { challengerSocketId: globalChallenge.socketId });
+      setGlobalChallenge(null);
+    }
+  }, [globalChallenge]);
+
+  const declineGlobalChallenge = useCallback(() => {
+    const socket = globalSocketRef.current;
+    if (socket && globalChallenge) {
+      socket.emit('decline-nearby-challenge', { challengerSocketId: globalChallenge.socketId });
+      setGlobalChallenge(null);
+    }
+  }, [globalChallenge]);
 
   const login = useCallback(async (email, password) => {
     const res = await fetch('/api/auth/login', {
@@ -121,6 +166,10 @@ export function AuthProvider({ children }) {
     setUser(null);
     setToken(null);
     localStorage.removeItem('chess_token');
+    if (globalSocketRef.current) {
+      disconnectSocket();
+      globalSocketRef.current = null;
+    }
   }, []);
 
   const googleLogin = useCallback(async (credential, mode = 'login') => {
@@ -148,6 +197,7 @@ export function AuthProvider({ children }) {
       login, signup, logout, googleLogin,
       verifyOTP, forgotPassword, resetPassword,
       showAuthModal, openAuthModal, closeAuthModal,
+      globalChallenge, acceptGlobalChallenge, declineGlobalChallenge, dismissGlobalChallenge,
     }}>
       {children}
     </AuthContext.Provider>

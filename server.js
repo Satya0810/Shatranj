@@ -16,6 +16,7 @@ const nearbyLobbies = new Map(); // ipAddress -> [ { socketId, userId, username,
 const mapPlayers = new Map(); // socketId -> { socketId, userId, username, rating, lat, lng, timeControl }
 const activeGames = new Map(); // gameId -> { chess, white, black, timeControl, whiteTime, blackTime, lastMoveTime, timerInterval }
 const onlineUsers = new Map(); // userId -> socketId
+const onlineByIp = new Map(); // ipAddress -> [ { socketId, userId, username, rating } ]
 
 async function saveGameResult(gameId, game, result, reason, winner) {
   if (!game.white.userId || !game.black.userId) return;
@@ -104,7 +105,23 @@ app.prepare().then(() => {
     socket.on('auth', (data) => {
       if (data && data.userId) {
         onlineUsers.set(data.userId, socket.id);
-        console.log(`User ${data.userId} authenticated on socket ${socket.id}`);
+        
+        // Track user by IP for nearby discovery
+        const ip = getClientIp(socket);
+        const ipUsers = onlineByIp.get(ip) || [];
+        const existingIdx = ipUsers.findIndex(u => u.userId === data.userId);
+        const entry = { socketId: socket.id, userId: data.userId, username: data.username || 'Unknown', rating: data.rating || 1200 };
+        if (existingIdx === -1) {
+          ipUsers.push(entry);
+        } else {
+          ipUsers[existingIdx] = entry;
+        }
+        onlineByIp.set(ip, ipUsers);
+        
+        // Broadcast updated nearby list to anyone in the nearby lobby on this IP
+        broadcastNearbyAll(ip, socket.id);
+        
+        console.log(`User ${data.userId} (${data.username}) authenticated on socket ${socket.id}, IP: ${ip}`);
       }
     });
 
@@ -116,6 +133,18 @@ app.prepare().then(() => {
       const players = nearbyLobbies.get(ip) || [];
       players.forEach(p => {
         io.to(p.socketId).emit('nearby-players', players.filter(other => other.socketId !== p.socketId));
+      });
+    };
+
+    // Broadcast ALL online users on the same IP to those in the nearby lobby
+    const broadcastNearbyAll = (ip) => {
+      const lobbyMembers = nearbyLobbies.get(ip) || [];
+      const allOnIp = onlineByIp.get(ip) || [];
+      
+      lobbyMembers.forEach(member => {
+        // Send all other users on same IP (whether they're in lobby or not)
+        const others = allOnIp.filter(u => u.socketId !== member.socketId);
+        io.to(member.socketId).emit('nearby-players', others);
       });
     };
 
@@ -199,8 +228,10 @@ app.prepare().then(() => {
       } else {
         players[existingIdx] = { ...data, socketId: socket.id, ip };
       }
-      broadcastNearby(ip);
-      console.log(`[Nearby] ${data.username} joined on IP ${ip}. Total: ${players.length}`);
+      
+      // Send all online users on same IP (not just lobby members)
+      broadcastNearbyAll(ip);
+      console.log(`[Nearby] ${data.username} joined on IP ${ip}. Total on IP: ${(onlineByIp.get(ip) || []).length}`);
     });
 
     socket.on('leave-nearby', () => {
@@ -213,7 +244,7 @@ app.prepare().then(() => {
           if (players.length === 0) {
             nearbyLobbies.delete(ip);
           } else {
-            broadcastNearby(ip);
+            broadcastNearbyAll(ip);
           }
         }
       }
@@ -629,19 +660,31 @@ app.prepare().then(() => {
         }
       }
 
+      // Remove from onlineByIp
+      const ip = getClientIp(socket);
+      const ipUsers = onlineByIp.get(ip);
+      if (ipUsers) {
+        const idx = ipUsers.findIndex(u => u.socketId === socket.id);
+        if (idx !== -1) {
+          ipUsers.splice(idx, 1);
+          if (ipUsers.length === 0) onlineByIp.delete(ip);
+        }
+        // Update nearby lobby members with new list
+        broadcastNearbyAll(ip);
+      }
+
       // Remove from lobby
       const lobbyIdx = lobby.findIndex(p => p.socketId === socket.id);
       if (lobbyIdx !== -1) lobby.splice(lobbyIdx, 1);
 
       // Remove from nearbyLobbies
-      const ip = getClientIp(socket);
       const nearbyPlayers = nearbyLobbies.get(ip);
       if (nearbyPlayers) {
         const idx = nearbyPlayers.findIndex(p => p.socketId === socket.id);
         if (idx !== -1) {
           nearbyPlayers.splice(idx, 1);
           if (nearbyPlayers.length === 0) nearbyLobbies.delete(ip);
-          else broadcastNearby(ip);
+          else broadcastNearbyAll(ip);
         }
       }
 

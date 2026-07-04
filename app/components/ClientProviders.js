@@ -2,6 +2,7 @@
 
 import { AuthProvider } from './AuthContext';
 import AuthModal from './AuthModal';
+import GlobalChallengeNotification from './GlobalChallengeNotification';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 
 export default function ClientProviders({ children }) {
@@ -13,6 +14,7 @@ export default function ClientProviders({ children }) {
       <AuthProvider>
         {children}
         <AuthModal />
+        <GlobalChallengeNotification />
       </AuthProvider>
     </GoogleOAuthProvider>
   );
