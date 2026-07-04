@@ -1589,7 +1589,7 @@ textarea.input {
 .game-panel,
 .analysis-panel {
   flex: 1;
-  min-width: 340px;
+  min-width: 280px;
   max-width: 450px;
   display: flex;
   flex-direction: column;

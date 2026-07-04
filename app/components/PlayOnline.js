@@ -75,7 +75,7 @@ export default function PlayOnline() {
   // Responsive board sizing
   useEffect(() => {
     const updateSize = () => {
-      const padding = window.innerWidth <= 1024 ? 32 : 120;
+      const padding = window.innerWidth <= 1024 ? 40 : 120; // 40px accounts for 16px page padding + 4px border
       const verticalOffset = window.innerWidth <= 1024 ? 180 : 280;
       const maxHeight = window.innerHeight - verticalOffset;
       const maxWidth = window.innerWidth <= 1024
@@ -871,11 +871,11 @@ export default function PlayOnline() {
 
         {/* Controls */}
         <div className="card">
-          <div className="card-body" style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-            <div style={{ flex: 2, display: 'flex', gap: '4px' }}>
+          <div className="card-body" style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 100%', display: 'flex', gap: '4px' }}>
               <select 
                 className="btn btn-secondary" 
-                style={{ flex: 1, padding: '8px 4px', fontSize: '13px', borderRight: 'none', borderRadius: '4px 0 0 4px' }}
+                style={{ flex: 1, padding: '8px 4px', fontSize: '13px', borderRight: 'none', borderRadius: '4px 0 0 4px', minWidth: 0 }}
                 value={callMode}
                 onChange={e => setCallMode(e.target.value)}
                 disabled={callStatus !== 'idle'}
@@ -900,7 +900,7 @@ export default function PlayOnline() {
             <button
               className="btn btn-secondary"
               onClick={handleOfferDraw}
-              style={{ flex: 1 }}
+              style={{ flex: '1 1 calc(50% - 4px)' }}
               title="Offer Draw"
             >
               🤝 Draw
@@ -909,7 +909,7 @@ export default function PlayOnline() {
               className="btn"
               onClick={handleResign}
               style={{
-                flex: 1,
+                flex: '1 1 calc(50% - 4px)',
                 background: 'rgba(224, 90, 90, 0.15)',
                 color: 'var(--accent-red)',
                 border: '1px solid rgba(224, 90, 90, 0.3)',
