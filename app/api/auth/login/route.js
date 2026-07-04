@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '../../../lib/mongodb';
 import User from '../../../models/User';
 import { comparePassword, signToken } from '../../../lib/auth';
+import Session from '../../../models/Session';
 
 export async function POST(req) {
   try {
@@ -35,8 +36,17 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Invalid email or password' }, { status: 401 });
     }
 
+    // Create session
+    const userAgent = req.headers.get('user-agent') || 'Unknown Device';
+    const ipAddress = req.headers.get('x-forwarded-for') || 'Unknown IP';
+    const session = await Session.create({
+      userId: user._id,
+      userAgent,
+      ipAddress
+    });
+
     // Generate token
-    const token = signToken(user._id);
+    const token = signToken(user._id, session._id);
 
     return NextResponse.json({
       token,

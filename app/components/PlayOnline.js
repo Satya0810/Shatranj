@@ -9,6 +9,9 @@ import { useAuth } from './AuthContext';
 import ProfileModal from './ProfileModal';
 import { useRouter } from 'next/navigation';
 import { getSocket, disconnectSocket } from '../lib/socket';
+import dynamic from 'next/dynamic';
+
+const MapLobby = dynamic(() => import('./MapLobby'), { ssr: false });
 
 const TIME_CONTROLS = [
   { label: '1 min', minutes: 1, increment: 0, icon: '⚡' },
@@ -47,6 +50,10 @@ export default function PlayOnline() {
   const [nearbyPlayers, setNearbyPlayers] = useState([]);
   const [incomingChallenge, setIncomingChallenge] = useState(null);
   const [sentChallenge, setSentChallenge] = useState(null);
+
+  // Map Lobby State
+  const [userLocation, setUserLocation] = useState(null);
+  const [mapPlayers, setMapPlayers] = useState([]);
 
   const [showProfileUsername, setShowProfileUsername] = useState(null);
   const clockIntervalRef = useRef(null);
@@ -317,6 +324,93 @@ export default function PlayOnline() {
     const socket = socketRef.current;
     if (socket && incomingChallenge) {
       socket.emit('decline-nearby-challenge', { challengerSocketId: incomingChallenge.socketId });
+      setIncomingChallenge(null);
+    }
+  };
+
+  const startMapLobby = useCallback(() => {
+    if (!user) {
+      openAuthModal();
+      return;
+    }
+    
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        setUserLocation({ lat, lng });
+        
+        const socket = getSocket();
+        socketRef.current = socket;
+        setPhase('map');
+        socket.emit('auth', { userId: user.id });
+
+        const tc = TIME_CONTROLS[selectedTC];
+        socket.emit('join-map-lobby', {
+          userId: user.id,
+          username: user.username,
+          rating: user.rating,
+          lat, lng,
+          timeControl: { minutes: tc.minutes, increment: tc.increment },
+        });
+
+        socket.off('map-players');
+        socket.off('incoming-map-challenge');
+        socket.off('map-challenge-declined');
+
+        socket.on('map-players', (players) => {
+          setMapPlayers(players);
+        });
+
+        socket.on('incoming-map-challenge', (data) => {
+          setIncomingChallenge(data.challenger);
+        });
+
+        socket.on('map-challenge-declined', () => {
+          setSentChallenge(null);
+          alert('Challenge declined');
+        });
+
+        registerGameListeners(socket);
+      }, (err) => {
+        alert("Please allow location access to find nearby players on the map.");
+      });
+    } else {
+      alert("Geolocation is not supported by your browser.");
+    }
+  }, [user, openAuthModal, selectedTC]);
+
+  const cancelMapLobby = useCallback(() => {
+    const socket = socketRef.current;
+    if (socket) {
+      socket.emit('leave-map-lobby', {});
+    }
+    setPhase('setup');
+    setMapPlayers([]);
+    setIncomingChallenge(null);
+    setSentChallenge(null);
+  }, []);
+
+  const challengeMapPlayer = (targetSocketId, username) => {
+    const socket = socketRef.current;
+    if (socket) {
+      const tc = TIME_CONTROLS[selectedTC];
+      socket.emit('challenge-map-player', { targetSocketId, timeControl: { minutes: tc.minutes, increment: tc.increment } });
+      setSentChallenge(username);
+    }
+  };
+
+  const acceptMapChallenge = () => {
+    const socket = socketRef.current;
+    if (socket && incomingChallenge) {
+      socket.emit('accept-map-challenge', { challengerSocketId: incomingChallenge.socketId });
+    }
+  };
+
+  const declineMapChallenge = () => {
+    const socket = socketRef.current;
+    if (socket && incomingChallenge) {
+      socket.emit('decline-map-challenge', { challengerSocketId: incomingChallenge.socketId });
       setIncomingChallenge(null);
     }
   };
@@ -767,6 +861,24 @@ export default function PlayOnline() {
               >
                 {user ? '📡 Play Nearby (WiFi)' : '🔑 Sign In to Play Nearby'}
               </button>
+
+              <button
+                className="btn btn-secondary"
+                onClick={startMapLobby}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  fontSize: '16px',
+                  fontWeight: 700,
+                  marginTop: 'var(--space-sm)',
+                  background: 'linear-gradient(135deg, #2b5876, #4e4376)',
+                  color: 'white',
+                  border: 'none',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+                }}
+              >
+                {user ? '🌍 Find Players on Map' : '🔑 Sign In to Find Players on Map'}
+              </button>
             </div>
           </div>
         </div>
@@ -871,6 +983,26 @@ export default function PlayOnline() {
               </div>
             </div>
           </div>
+        )}
+      </div>
+    );
+  }
+
+  // MAP LOBBY PHASE
+  if (phase === 'map') {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 'calc(100vh - 60px)', padding: 'var(--space-xl)' }}>
+        {userLocation && (
+          <MapLobby
+            userPosition={userLocation}
+            mapPlayers={mapPlayers}
+            onChallenge={challengeMapPlayer}
+            incomingChallenge={incomingChallenge}
+            onAccept={acceptMapChallenge}
+            onDecline={declineMapChallenge}
+            cancelMapLobby={cancelMapLobby}
+            sentChallenge={sentChallenge}
+          />
         )}
       </div>
     );

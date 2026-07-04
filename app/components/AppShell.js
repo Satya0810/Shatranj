@@ -2,6 +2,7 @@
 
 import Sidebar from './Sidebar';
 import Header from './Header';
+import Footer from './Footer';
 
 export default function AppShell({ children, title }) {
   return (
@@ -12,6 +13,7 @@ export default function AppShell({ children, title }) {
         <main className="app-main">
           {children}
         </main>
+        <Footer />
       </div>
     </div>
   );

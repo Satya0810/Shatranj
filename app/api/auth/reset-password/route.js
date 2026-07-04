@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '../../../lib/mongodb';
 import User from '../../../models/User';
 import { hashPassword, signToken } from '../../../lib/auth';
+import Session from '../../../models/Session';
 
 export async function POST(req) {
   try {
@@ -43,8 +44,16 @@ export async function POST(req) {
     
     await user.save();
 
+    const userAgent = req.headers.get('user-agent') || 'Unknown Device';
+    const ipAddress = req.headers.get('x-forwarded-for') || 'Unknown IP';
+    const session = await Session.create({
+      userId: user._id,
+      userAgent,
+      ipAddress
+    });
+
     // Log them in immediately after reset
-    const token = signToken(user._id);
+    const token = signToken(user._id, session._id);
 
     return NextResponse.json({
       token,

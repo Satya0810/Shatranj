@@ -13,6 +13,7 @@ const PORT = process.env.PORT || 3000;
 // In-memory lobby and game state
 const lobby = []; // { socketId, userId, username, rating }
 const nearbyLobbies = new Map(); // ipAddress -> [ { socketId, userId, username, rating, timeControl } ]
+const mapPlayers = new Map(); // socketId -> { socketId, userId, username, rating, lat, lng, timeControl }
 const activeGames = new Map(); // gameId -> { chess, white, black, timeControl, whiteTime, blackTime, lastMoveTime, timerInterval }
 const onlineUsers = new Map(); // userId -> socketId
 
@@ -117,6 +118,76 @@ app.prepare().then(() => {
         io.to(p.socketId).emit('nearby-players', players.filter(other => other.socketId !== p.socketId));
       });
     };
+
+    const broadcastMapLobby = () => {
+      const players = Array.from(mapPlayers.values());
+      players.forEach(p => {
+        io.to(p.socketId).emit('map-players', players.filter(other => other.socketId !== p.socketId));
+      });
+    };
+
+    // --- Map Lobby ---
+    socket.on('join-map-lobby', (data) => {
+      mapPlayers.set(socket.id, { ...data, socketId: socket.id });
+      broadcastMapLobby();
+      console.log(`[Map] ${data.username} joined from [${data.lat}, ${data.lng}].`);
+    });
+
+    socket.on('leave-map-lobby', () => {
+      if (mapPlayers.has(socket.id)) {
+        mapPlayers.delete(socket.id);
+        broadcastMapLobby();
+      }
+    });
+
+    socket.on('challenge-map-player', (data) => {
+      const { targetSocketId, timeControl } = data;
+      const challenger = mapPlayers.get(socket.id);
+      if (challenger) {
+        io.to(targetSocketId).emit('incoming-map-challenge', { challenger: { ...challenger, timeControl } });
+      }
+    });
+
+    socket.on('accept-map-challenge', (data) => {
+      const { challengerSocketId } = data;
+      const challenger = mapPlayers.get(challengerSocketId);
+      const acceptor = mapPlayers.get(socket.id);
+
+      if (challenger && acceptor) {
+        const isWhite = Math.random() > 0.5;
+        const white = isWhite ? acceptor : challenger;
+        const black = isWhite ? challenger : acceptor;
+        
+        const tc = challenger.timeControl || { minutes: 10, increment: 0 };
+        const gameId = `game_map_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const chess = new Chess();
+        const initialTime = tc.minutes * 60 * 1000;
+
+        activeGames.set(gameId, {
+          chess, white, black, timeControl: tc,
+          whiteTime: initialTime, blackTime: initialTime,
+          lastMoveTime: Date.now(), timerInterval: null,
+        });
+
+        const gameData = { gameId, timeControl: tc, whiteTime: initialTime, blackTime: initialTime };
+
+        io.to(white.socketId).emit('game-start', { ...gameData, color: 'white', opponent: { username: black.username, rating: black.rating, userId: black.userId } });
+        io.to(black.socketId).emit('game-start', { ...gameData, color: 'black', opponent: { username: white.username, rating: white.rating, userId: white.userId } });
+
+        const whiteSocket = io.sockets.sockets.get(white.socketId);
+        const blackSocket = io.sockets.sockets.get(black.socketId);
+        if (whiteSocket) whiteSocket.join(gameId);
+        if (blackSocket) blackSocket.join(gameId);
+
+        mapPlayers.delete(white.socketId);
+        mapPlayers.delete(black.socketId);
+        broadcastMapLobby();
+      }
+    });
+
+    socket.on('decline-map-challenge', (data) => {
+      io.to(data.challengerSocketId).emit('map-challenge-declined');
+    });
 
     socket.on('join-nearby', (data) => {
       const ip = getClientIp(socket);
@@ -572,6 +643,12 @@ app.prepare().then(() => {
           if (nearbyPlayers.length === 0) nearbyLobbies.delete(ip);
           else broadcastNearby(ip);
         }
+      }
+
+      // Remove from mapLobbies
+      if (mapPlayers.has(socket.id)) {
+        mapPlayers.delete(socket.id);
+        broadcastMapLobby();
       }
 
       // Check if player was in an active game

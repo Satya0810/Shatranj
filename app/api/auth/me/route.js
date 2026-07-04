@@ -10,7 +10,7 @@ export async function GET(req) {
       return NextResponse.json({ error: 'No token provided' }, { status: 401 });
     }
 
-    const decoded = verifyToken(token);
+    const decoded = await verifyToken(token);
     if (!decoded) {
       return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }

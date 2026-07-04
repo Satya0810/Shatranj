@@ -21,6 +21,10 @@ export default function ProfileModal({ username, onClose }) {
   const [updatingUsername, setUpdatingUsername] = useState(false);
   const [updateError, setUpdateError] = useState('');
 
+  const [sessions, setSessions] = useState([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
+  const [revokingSessionId, setRevokingSessionId] = useState(null);
+
   const fetchProfile = useCallback(async () => {
     try {
       const res = await fetch(`/api/users/${username}`);
@@ -121,11 +125,49 @@ export default function ProfileModal({ username, onClose }) {
     }
   };
 
+  const fetchSessions = useCallback(async () => {
+    if (!isOwnProfile) return;
+    setLoadingSessions(true);
+    try {
+      const token = localStorage.getItem('chess_token');
+      const res = await fetch('/api/auth/sessions', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSessions(data.sessions || []);
+      }
+    } catch (err) {
+      console.error('Failed to load sessions', err);
+    } finally {
+      setLoadingSessions(false);
+    }
+  }, [isOwnProfile]);
+
+  const handleRevokeSession = async (sessionId) => {
+    setRevokingSessionId(sessionId);
+    try {
+      const token = localStorage.getItem('chess_token');
+      const res = await fetch(`/api/auth/sessions/${sessionId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setSessions(sessions.filter(s => s._id !== sessionId));
+      }
+    } catch (err) {
+      console.error('Failed to revoke session', err);
+    } finally {
+      setRevokingSessionId(null);
+    }
+  };
+
   useEffect(() => {
     if (username) {
       fetchProfile();
+      fetchSessions();
     }
-  }, [username, fetchProfile]);
+  }, [username, fetchProfile, fetchSessions]);
 
   if (!username) return null;
 
@@ -476,6 +518,49 @@ export default function ProfileModal({ username, onClose }) {
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {isOwnProfile && (
+              <div style={{ marginTop: 'var(--space-2xl)', background: 'var(--bg-surface)', padding: 'var(--space-lg)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: 'var(--space-md)' }}>
+                  <span style={{ fontSize: '20px' }}>📱</span>
+                  <h3 style={{ fontSize: '18px', fontWeight: 700, margin: 0 }}>Active Sessions</h3>
+                </div>
+                {loadingSessions ? (
+                  <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>Loading sessions...</div>
+                ) : sessions.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {sessions.map(session => (
+                      <div key={session._id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '12px', borderRadius: 'var(--radius-md)' }}>
+                        <div>
+                          <div style={{ fontSize: '14px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            {session.userAgent.includes('Mobile') ? '📱' : '💻'} 
+                            {session.userAgent.split(' ')[0] || 'Unknown Device'}
+                            {session.isCurrent && (
+                              <span style={{ fontSize: '10px', background: 'var(--accent-blue)', color: 'white', padding: '2px 6px', borderRadius: '4px' }}>Current</span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                            IP: {session.ipAddress} • Last Active: {new Date(session.lastActive).toLocaleDateString()}
+                          </div>
+                        </div>
+                        {!session.isCurrent && (
+                          <button 
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => handleRevokeSession(session._id)}
+                            disabled={revokingSessionId === session._id}
+                            style={{ borderColor: 'var(--accent-red)', color: 'var(--accent-red)' }}
+                          >
+                            {revokingSessionId === session._id ? '...' : 'Log out'}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: 'var(--text-muted)', fontSize: '13px' }}>No active sessions found.</div>
+                )}
               </div>
             )}
           </div>

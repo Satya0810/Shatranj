@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# Private areas to not index
+Disallow: /api/
+Disallow: /analyze/
+Disallow: /play/
+
+Sitemap: https://chessmaster.local/sitemap.xml

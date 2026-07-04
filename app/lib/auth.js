@@ -1,15 +1,30 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import connectDB from './mongodb';
+import Session from '../models/Session';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key_dev';
 
-export function signToken(userId) {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '30d' });
+export function signToken(userId, sessionId) {
+  return jwt.sign({ userId, jti: sessionId }, JWT_SECRET, { expiresIn: '30d' });
 }
 
-export function verifyToken(token) {
+export async function verifyToken(token) {
   try {
-    return jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (!decoded || !decoded.jti) return null;
+    
+    await connectDB();
+    const session = await Session.findById(decoded.jti);
+    if (!session) return null; // Session was revoked
+    
+    // Optionally update lastActive timestamp here (throttled to avoid DB hammering)
+    // if (Date.now() - new Date(session.lastActive).getTime() > 3600000) {
+    //   session.lastActive = new Date();
+    //   await session.save();
+    // }
+    
+    return decoded;
   } catch (e) {
     return null;
   }

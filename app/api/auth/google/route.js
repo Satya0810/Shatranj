@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import connectDB from '../../../lib/mongodb';
 import User from '../../../models/User';
 import { signToken } from '../../../lib/auth';
+import Session from '../../../models/Session';
 
 export async function POST(req) {
   try {
@@ -57,7 +58,15 @@ export async function POST(req) {
       }
     }
 
-    const token = signToken(user._id);
+    const userAgent = req.headers.get('user-agent') || 'Unknown Device';
+    const ipAddress = req.headers.get('x-forwarded-for') || 'Unknown IP';
+    const session = await Session.create({
+      userId: user._id,
+      userAgent,
+      ipAddress
+    });
+
+    const token = signToken(user._id, session._id);
 
     return NextResponse.json({
       token,

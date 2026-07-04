@@ -3,6 +3,7 @@ import connectDB from '../../../lib/mongodb';
 import User from '../../../models/User';
 import { hashPassword, signToken } from '../../../lib/auth';
 import { sendVerificationEmail } from '../../../lib/mailer';
+import Session from '../../../models/Session';
 
 export async function POST(req) {
   try {
@@ -68,7 +69,16 @@ export async function POST(req) {
     if (emailResult && emailResult.mock) {
       user.isVerified = true;
       await user.save();
-      const token = signToken(user._id);
+      
+      const userAgent = req.headers.get('user-agent') || 'Unknown Device';
+      const ipAddress = req.headers.get('x-forwarded-for') || 'Unknown IP';
+      const session = await Session.create({
+        userId: user._id,
+        userAgent,
+        ipAddress
+      });
+      
+      const token = signToken(user._id, session._id);
       return NextResponse.json({
         requires_verification: false,
         message: 'Signup successful. Email verification bypassed (no SMTP).',
