@@ -365,6 +365,30 @@ app.prepare().then(() => {
       io.to(opponentSocketId).emit('webrtc-ice-candidate', { candidate });
     });
 
+    socket.on('call-request', (data) => {
+      const { gameId, mode } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+      const opponentSocketId = socket.id === game.white.socketId ? game.black.socketId : game.white.socketId;
+      io.to(opponentSocketId).emit('call-request', { mode });
+    });
+
+    socket.on('call-accepted', (data) => {
+      const { gameId } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+      const opponentSocketId = socket.id === game.white.socketId ? game.black.socketId : game.white.socketId;
+      io.to(opponentSocketId).emit('call-accepted');
+    });
+
+    socket.on('call-declined', (data) => {
+      const { gameId } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+      const opponentSocketId = socket.id === game.white.socketId ? game.black.socketId : game.white.socketId;
+      io.to(opponentSocketId).emit('call-declined');
+    });
+
     // Disconnect
     socket.on('disconnect', () => {
       console.log(`Player disconnected: ${socket.id}`);

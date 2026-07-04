@@ -69,6 +69,8 @@ export default function PlayOnline() {
   const [remoteStream, setRemoteStream] = useState(null);
   const [showVideoSection, setShowVideoSection] = useState(false);
   const [callMode, setCallMode] = useState('voice');
+  const [callStatus, setCallStatus] = useState('idle'); // 'idle' | 'calling' | 'connected'
+  const [incomingCall, setIncomingCall] = useState(null); // { mode }
 
   // Responsive board sizing
   useEffect(() => {
@@ -321,11 +323,10 @@ export default function PlayOnline() {
     }
   }, [gameId]);
 
-  const handleStartCall = (withVideo) => {
-    if (withVideo) setShowVideoSection(true);
-    if (!peerConnectionRef.current) {
-      initializeWebRTC(orientation === 'white', withVideo);
-    }
+  const handleStartCall = (mode) => {
+    if (callStatus !== 'idle') return;
+    setCallStatus('calling');
+    socketRef.current.emit('call-request', { gameId, mode });
   };
 
   useEffect(() => {
@@ -387,18 +388,41 @@ export default function PlayOnline() {
       }
     };
 
+    const handleCallRequest = (data) => {
+      if (callStatus === 'idle') {
+        setIncomingCall({ mode: data.mode });
+      }
+    };
+
+    const handleCallAccepted = () => {
+      setCallStatus('connected');
+      if (callMode === 'share' || callMode === 'view') setShowVideoSection(true);
+      initializeWebRTC(true, callMode !== 'voice'); // Caller is initiator
+    };
+
+    const handleCallDeclined = () => {
+      setCallStatus('idle');
+      alert("Opponent declined the call.");
+    };
+
     socket.on('chat-message', handleChat);
     socket.on('webrtc-offer', handleOffer);
     socket.on('webrtc-answer', handleAnswer);
     socket.on('webrtc-ice-candidate', handleIce);
+    socket.on('call-request', handleCallRequest);
+    socket.on('call-accepted', handleCallAccepted);
+    socket.on('call-declined', handleCallDeclined);
 
     return () => {
       socket.off('chat-message', handleChat);
       socket.off('webrtc-offer', handleOffer);
       socket.off('webrtc-answer', handleAnswer);
       socket.off('webrtc-ice-candidate', handleIce);
+      socket.off('call-request', handleCallRequest);
+      socket.off('call-accepted', handleCallAccepted);
+      socket.off('call-declined', handleCallDeclined);
     };
-  }, [gameId]);
+  }, [gameId, callStatus, callMode, initializeWebRTC]);
 
   const toggleVideo = () => {
     if (localStreamRef.current) {
@@ -808,6 +832,43 @@ export default function PlayOnline() {
           </div>
         )}
 
+        {/* Incoming Call Prompt */}
+        {incomingCall && (
+          <div className="card" style={{ border: '1px solid var(--accent-green)', background: 'rgba(129, 182, 74, 0.1)' }}>
+            <div className="card-body" style={{ textAlign: 'center' }}>
+              <p style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
+                📞 Opponent wants to start a {incomingCall.mode === 'voice' ? 'Voice' : 'Video'} call
+              </p>
+              <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+                <button 
+                  className="btn btn-primary" 
+                  onClick={() => {
+                    setCallStatus('connected');
+                    socketRef.current.emit('call-accepted', { gameId });
+                    setCallMode(incomingCall.mode);
+                    if (incomingCall.mode === 'share' || incomingCall.mode === 'view') setShowVideoSection(true);
+                    initializeWebRTC(false, incomingCall.mode !== 'voice'); // Receiver is NOT initiator
+                    setIncomingCall(null);
+                  }} 
+                  style={{ flex: 1 }}
+                >
+                  ✓ Accept
+                </button>
+                <button 
+                  className="btn btn-secondary" 
+                  onClick={() => {
+                    socketRef.current.emit('call-declined', { gameId });
+                    setIncomingCall(null);
+                  }} 
+                  style={{ flex: 1 }}
+                >
+                  ✕ Decline
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Controls */}
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 'var(--space-sm)' }}>
@@ -817,6 +878,7 @@ export default function PlayOnline() {
                 style={{ flex: 1, padding: '8px 4px', fontSize: '13px', borderRight: 'none', borderRadius: '4px 0 0 4px' }}
                 value={callMode}
                 onChange={e => setCallMode(e.target.value)}
+                disabled={callStatus !== 'idle'}
                 title="Select Call Mode"
               >
                 <option value="voice">🎙️ Voice Only</option>
@@ -824,16 +886,15 @@ export default function PlayOnline() {
                 <option value="share">📹 Share Video</option>
               </select>
               <button
-                className="btn btn-primary"
+                className={`btn ${callStatus === 'idle' ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => {
-                  if (callMode === 'voice') handleStartCall(false);
-                  else if (callMode === 'view') { handleStartCall(false); setShowVideoSection(true); }
-                  else if (callMode === 'share') handleStartCall(true);
+                  if (callStatus === 'idle') handleStartCall(callMode);
                 }}
+                disabled={callStatus !== 'idle'}
                 style={{ padding: '8px 12px', fontSize: '13px', borderRadius: '0 4px 4px 0' }}
                 title="Join Conversation"
               >
-                Join
+                {callStatus === 'idle' ? 'Join' : callStatus === 'calling' ? 'Ringing...' : 'Connected'}
               </button>
             </div>
             <button
