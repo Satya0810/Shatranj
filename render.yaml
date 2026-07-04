@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: shatranj-chess
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: NEXT_PUBLIC_GOOGLE_CLIENT_ID
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
