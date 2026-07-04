@@ -51,6 +51,11 @@ export default function PlayOnline() {
   const [incomingChallenge, setIncomingChallenge] = useState(null);
   const [sentChallenge, setSentChallenge] = useState(null);
 
+  // Nearby challenge note & block
+  const [challengeNote, setChallengeNote] = useState('');
+  const [showNoteModal, setShowNoteModal] = useState(null); // { socketId, username }
+  const [blockedNearbyUsers, setBlockedNearbyUsers] = useState([]);
+
   // Map Lobby State
   const [userLocation, setUserLocation] = useState(null);
   const [mapPlayers, setMapPlayers] = useState([]);
@@ -282,6 +287,8 @@ export default function PlayOnline() {
     });
 
     socket.on('incoming-challenge', (data) => {
+      // Ignore challenges from blocked users
+      if (blockedNearbyUsers.includes(data.challenger.userId)) return;
       setIncomingChallenge(data.challenger);
     });
 
@@ -308,9 +315,16 @@ export default function PlayOnline() {
     const socket = socketRef.current;
     if (socket) {
       const tc = TIME_CONTROLS[selectedTC];
-      socket.emit('challenge-nearby', { targetSocketId, timeControl: { minutes: tc.minutes, increment: tc.increment } });
+      socket.emit('challenge-nearby', { targetSocketId, timeControl: { minutes: tc.minutes, increment: tc.increment }, note: challengeNote });
       setSentChallenge(username);
+      setShowNoteModal(null);
+      setChallengeNote('');
     }
+  };
+
+  const openChallengeModal = (socketId, username) => {
+    setShowNoteModal({ socketId, username });
+    setChallengeNote('');
   };
 
   const acceptNearbyChallenge = () => {
@@ -324,6 +338,17 @@ export default function PlayOnline() {
     const socket = socketRef.current;
     if (socket && incomingChallenge) {
       socket.emit('decline-nearby-challenge', { challengerSocketId: incomingChallenge.socketId });
+      setIncomingChallenge(null);
+    }
+  };
+
+  const blockNearbyUser = () => {
+    if (incomingChallenge) {
+      setBlockedNearbyUsers(prev => [...prev, incomingChallenge.userId]);
+      const socket = socketRef.current;
+      if (socket) {
+        socket.emit('decline-nearby-challenge', { challengerSocketId: incomingChallenge.socketId });
+      }
       setIncomingChallenge(null);
     }
   };
@@ -917,69 +942,182 @@ export default function PlayOnline() {
           transform: 'translate(-50%, -50%)',
         }} />
 
-        <div style={{ textAlign: 'center', zIndex: 10 }}>
+        <div style={{ textAlign: 'center', zIndex: 10, maxWidth: '650px', width: '100%' }}>
           <div style={{
-            width: '100px',
-            height: '100px',
+            width: '80px',
+            height: '80px',
             background: 'var(--accent-green)',
             borderRadius: '50%',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: '40px',
+            fontSize: '36px',
             color: 'white',
-            margin: '0 auto var(--space-xl)',
+            margin: '0 auto var(--space-lg)',
             boxShadow: '0 0 20px rgba(129, 182, 74, 0.4)'
           }}>
-            👤
+            📡
           </div>
-          <h2 style={{ marginBottom: 'var(--space-sm)' }}>You ({user?.username})</h2>
-          <p style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-xl)' }}>Searching for players on your WiFi...</p>
+          <h2 style={{ marginBottom: 'var(--space-sm)' }}>Nearby Players</h2>
+          <p style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-xl)' }}>Players on your WiFi network • Send a request to play!</p>
           
-          <div style={{ display: 'flex', gap: 'var(--space-md)', justifyContent: 'center', flexWrap: 'wrap', maxWidth: '600px' }}>
-            {nearbyPlayers.length === 0 ? (
-              <div style={{ color: 'var(--text-muted)' }}>No one else is here right now.</div>
+          {/* Players List */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)', marginBottom: 'var(--space-xl)' }}>
+            {nearbyPlayers.filter(p => !blockedNearbyUsers.includes(p.userId)).length === 0 ? (
+              <div style={{ color: 'var(--text-muted)', padding: 'var(--space-xl)', background: 'var(--bg-surface)', borderRadius: 'var(--radius-lg)', border: '1px dashed var(--border-color)' }}>
+                <div style={{ fontSize: '40px', marginBottom: 'var(--space-sm)' }}>👀</div>
+                No players found yet. Ask someone nearby to join!
+              </div>
             ) : (
-              nearbyPlayers.map(p => (
-                <div key={p.socketId} style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => challengeNearbyPlayer(p.socketId, p.username)}>
-                  <div style={{
-                    width: '70px', height: '70px',
-                    borderRadius: '50%',
-                    background: sentChallenge === p.username ? 'var(--accent-orange)' : 'var(--bg-surface-hover)',
-                    border: '2px solid var(--border-color)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '24px', margin: '0 auto 8px',
-                    transition: 'all 0.2s'
-                  }}>
-                    {sentChallenge === p.username ? '⌛' : '👤'}
+              nearbyPlayers.filter(p => !blockedNearbyUsers.includes(p.userId)).map(p => (
+                <div key={p.socketId} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: 'var(--space-md) var(--space-lg)',
+                  background: 'var(--bg-surface)',
+                  borderRadius: 'var(--radius-lg)',
+                  border: '1px solid var(--border-color)',
+                  transition: 'all 0.2s'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-md)' }}>
+                    <div style={{
+                      width: '48px', height: '48px',
+                      borderRadius: '50%',
+                      background: 'linear-gradient(135deg, var(--accent-green), var(--accent-blue))',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '22px', color: 'white', fontWeight: 'bold'
+                    }}>
+                      {p.username.charAt(0).toUpperCase()}
+                    </div>
+                    <div style={{ textAlign: 'left' }}>
+                      <div style={{ fontWeight: 700, fontSize: '16px' }}>{p.username}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Rating: {p.rating}</div>
+                    </div>
                   </div>
-                  <div style={{ fontWeight: 600 }}>{p.username}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{p.rating}</div>
+                  {sentChallenge === p.username ? (
+                    <div style={{ fontSize: '13px', color: 'var(--accent-gold)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span className="spinner" style={{ width: '14px', height: '14px' }} /> Sent...
+                    </div>
+                  ) : (
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => openChallengeModal(p.socketId, p.username)}
+                      style={{ fontWeight: 700, padding: '8px 16px' }}
+                    >
+                      ⚔️ Challenge
+                    </button>
+                  )}
                 </div>
               ))
             )}
           </div>
 
-          <button className="btn btn-secondary" onClick={cancelNearby} style={{ marginTop: 'var(--space-2xl)' }}>
-            ✕ Cancel
+          <button className="btn btn-secondary" onClick={cancelNearby} style={{ marginTop: 'var(--space-md)' }}>
+            ✕ Leave Lobby
           </button>
         </div>
+
+        {/* Send Challenge Modal with Note */}
+        {showNoteModal && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
+            backdropFilter: 'blur(4px)'
+          }}>
+            <div className="card" style={{ padding: 'var(--space-xl)', textAlign: 'center', maxWidth: '380px', width: '90%' }}>
+              <div style={{ fontSize: '40px', marginBottom: 'var(--space-md)' }}>⚔️</div>
+              <h3 style={{ marginBottom: 'var(--space-sm)' }}>Challenge {showNoteModal.username}</h3>
+              <p style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-lg)', fontSize: '14px' }}>Add an optional note to your challenge request.</p>
+              <textarea
+                value={challengeNote}
+                onChange={(e) => setChallengeNote(e.target.value)}
+                placeholder="e.g. GG last game! Rematch? 🔥"
+                maxLength={100}
+                style={{
+                  width: '100%',
+                  padding: 'var(--space-md)',
+                  background: 'var(--bg-surface)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 'var(--radius-md)',
+                  color: 'var(--text-primary)',
+                  fontSize: '14px',
+                  resize: 'none',
+                  minHeight: '70px',
+                  marginBottom: 'var(--space-lg)',
+                  fontFamily: 'inherit'
+                }}
+              />
+              <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => challengeNearbyPlayer(showNoteModal.socketId, showNoteModal.username)}
+                  style={{ flex: 1, fontWeight: 700 }}
+                >
+                  🚀 Send Challenge
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => { setShowNoteModal(null); setChallengeNote(''); }}
+                  style={{ flex: 1 }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Incoming Challenge Modal */}
         {incomingChallenge && (
           <div style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200,
+            backdropFilter: 'blur(4px)'
           }}>
-            <div className="card" style={{ padding: 'var(--space-xl)', textAlign: 'center', maxWidth: '300px' }}>
-              <div style={{ fontSize: '40px', marginBottom: 'var(--space-md)' }}>⚔️</div>
-              <h3>Challenge Received!</h3>
-              <p style={{ color: 'var(--text-muted)', marginBottom: 'var(--space-xl)' }}>
-                <strong>{incomingChallenge.username}</strong> ({incomingChallenge.rating}) challenged you to a game.
+            <div className="card" style={{ padding: 'var(--space-xl)', textAlign: 'center', maxWidth: '360px', width: '90%' }}>
+              <div style={{ fontSize: '48px', marginBottom: 'var(--space-md)' }}>⚔️</div>
+              <h3 style={{ marginBottom: 'var(--space-xs)' }}>Challenge Received!</h3>
+              <p style={{ color: 'var(--text-secondary)', marginBottom: 'var(--space-md)', fontSize: '16px' }}>
+                <strong>{incomingChallenge.username}</strong> ({incomingChallenge.rating})
               </p>
-              <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-                <button className="btn btn-primary" onClick={acceptNearbyChallenge} style={{ flex: 1 }}>Accept</button>
-                <button className="btn btn-secondary" onClick={declineNearbyChallenge} style={{ flex: 1 }}>Decline</button>
+              {incomingChallenge.note && (
+                <div style={{
+                  background: 'var(--bg-surface)',
+                  padding: 'var(--space-md)',
+                  borderRadius: 'var(--radius-md)',
+                  marginBottom: 'var(--space-lg)',
+                  border: '1px solid var(--border-color)',
+                  fontStyle: 'italic',
+                  color: 'var(--text-secondary)',
+                  fontSize: '14px'
+                }}>
+                  "{incomingChallenge.note}"
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+                <button className="btn btn-primary" onClick={acceptNearbyChallenge} style={{ width: '100%', fontWeight: 700 }}>
+                  ✅ Accept
+                </button>
+                <button className="btn btn-secondary" onClick={declineNearbyChallenge} style={{ width: '100%' }}>
+                  ✕ Decline
+                </button>
+                <button
+                  onClick={blockNearbyUser}
+                  style={{
+                    width: '100%',
+                    padding: '10px',
+                    background: 'transparent',
+                    border: '1px solid var(--accent-red)',
+                    color: 'var(--accent-red)',
+                    borderRadius: 'var(--radius-md)',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    transition: 'all 0.2s'
+                  }}
+                >
+                  🚫 Block User
+                </button>
               </div>
             </div>
           </div>

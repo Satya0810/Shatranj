@@ -220,12 +220,12 @@ app.prepare().then(() => {
     });
 
     socket.on('challenge-nearby', (data) => {
-      const { targetSocketId, timeControl } = data;
+      const { targetSocketId, timeControl, note } = data;
       const ip = getClientIp(socket);
       const players = nearbyLobbies.get(ip) || [];
       const challenger = players.find(p => p.socketId === socket.id);
       if (challenger) {
-        io.to(targetSocketId).emit('incoming-challenge', { challenger: { ...challenger, timeControl } });
+        io.to(targetSocketId).emit('incoming-challenge', { challenger: { ...challenger, timeControl, note: note || '' } });
       }
     });
 
