@@ -719,6 +719,7 @@ export default function PlayOnline() {
 
   // PLAYING PHASE
   return (
+    <>
     <div className="play-layout" id="play-online-layout">
       {/* Video Section */}
       <div className="video-section" style={{ display: showVideoSection ? 'flex' : 'none', flexDirection: 'column', gap: 'var(--space-md)', width: '240px', flexShrink: 0 }}>

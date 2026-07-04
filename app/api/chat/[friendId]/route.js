@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import connectDB from '../../../lib/mongodb';
 import Message from '../../../models/Message';
-import { verifyAuth } from '../../../lib/auth';
+import { verifyToken } from '../../../lib/auth';
 
 export async function GET(req, { params }) {
   try {
@@ -13,7 +13,7 @@ export async function GET(req, { params }) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
     const token = authHeader.split(' ')[1];
-    const decoded = verifyAuth(token);
+    const decoded = verifyToken(token);
     if (!decoded) {
       return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
     }
