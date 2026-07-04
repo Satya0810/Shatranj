@@ -329,6 +329,22 @@ export default function PlayOnline() {
     socketRef.current.emit('call-request', { gameId, mode });
   };
 
+  const handleHangUp = useCallback(() => {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    setCallStatus('idle');
+    setShowVideoSection(false);
+    if (socketRef.current && gameId) {
+      socketRef.current.emit('call-ended', { gameId });
+    }
+  }, [gameId]);
+
   useEffect(() => {
     if (phase === 'playing' && gameId && !peerConnectionRef.current) {
       // Auto-start disabled, user must click Voice or Video
@@ -405,6 +421,20 @@ export default function PlayOnline() {
       alert("Opponent declined the call.");
     };
 
+    const handleCallEnded = () => {
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+      }
+      setCallStatus('idle');
+      setShowVideoSection(false);
+      alert("Opponent ended the call.");
+    };
+
     socket.on('chat-message', handleChat);
     socket.on('webrtc-offer', handleOffer);
     socket.on('webrtc-answer', handleAnswer);
@@ -412,6 +442,7 @@ export default function PlayOnline() {
     socket.on('call-request', handleCallRequest);
     socket.on('call-accepted', handleCallAccepted);
     socket.on('call-declined', handleCallDeclined);
+    socket.on('call-ended', handleCallEnded);
 
     return () => {
       socket.off('chat-message', handleChat);
@@ -421,6 +452,7 @@ export default function PlayOnline() {
       socket.off('call-request', handleCallRequest);
       socket.off('call-accepted', handleCallAccepted);
       socket.off('call-declined', handleCallDeclined);
+      socket.off('call-ended', handleCallEnded);
     };
   }, [gameId, callStatus, callMode, initializeWebRTC]);
 
@@ -872,31 +904,49 @@ export default function PlayOnline() {
         {/* Controls */}
         <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 100%', display: 'flex', gap: '4px' }}>
-              <select 
-                className="btn btn-secondary" 
-                style={{ flex: 1, padding: '8px 4px', fontSize: '13px', borderRight: 'none', borderRadius: '4px 0 0 4px', minWidth: 0 }}
-                value={callMode}
-                onChange={e => setCallMode(e.target.value)}
-                disabled={callStatus !== 'idle'}
-                title="Select Call Mode"
-              >
-                <option value="voice">🎙️ Voice Only</option>
-                <option value="view">👁️ View Video</option>
-                <option value="share">📹 Share Video</option>
-              </select>
+            {callStatus === 'connected' ? (
               <button
-                className={`btn ${callStatus === 'idle' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => {
-                  if (callStatus === 'idle') handleStartCall(callMode);
+                className="btn"
+                onClick={handleHangUp}
+                style={{ 
+                  flex: '1 1 100%', 
+                  padding: '8px 12px', 
+                  fontSize: '13px',
+                  background: 'rgba(224, 90, 90, 0.15)',
+                  color: 'var(--accent-red)',
+                  border: '1px solid rgba(224, 90, 90, 0.3)'
                 }}
-                disabled={callStatus !== 'idle'}
-                style={{ padding: '8px 12px', fontSize: '13px', borderRadius: '0 4px 4px 0' }}
-                title="Join Conversation"
+                title="End Call to change options"
               >
-                {callStatus === 'idle' ? 'Join' : callStatus === 'calling' ? 'Ringing...' : 'Connected'}
+                🔴 Hang Up
               </button>
-            </div>
+            ) : (
+              <div style={{ flex: '1 1 100%', display: 'flex', gap: '4px' }}>
+                <select 
+                  className="btn btn-secondary" 
+                  style={{ flex: 1, padding: '8px 4px', fontSize: '13px', borderRight: 'none', borderRadius: '4px 0 0 4px', minWidth: 0 }}
+                  value={callMode}
+                  onChange={e => setCallMode(e.target.value)}
+                  disabled={callStatus !== 'idle'}
+                  title="Select Call Mode"
+                >
+                  <option value="voice">🎙️ Voice Only</option>
+                  <option value="view">👁️ View Video</option>
+                  <option value="share">📹 Share Video</option>
+                </select>
+                <button
+                  className={`btn ${callStatus === 'idle' ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => {
+                    if (callStatus === 'idle') handleStartCall(callMode);
+                  }}
+                  disabled={callStatus !== 'idle'}
+                  style={{ padding: '8px 12px', fontSize: '13px', borderRadius: '0 4px 4px 0' }}
+                  title="Join Conversation"
+                >
+                  {callStatus === 'idle' ? 'Join' : 'Ringing...'}
+                </button>
+              </div>
+            )}
             <button
               className="btn btn-secondary"
               onClick={handleOfferDraw}

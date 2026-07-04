@@ -389,6 +389,14 @@ app.prepare().then(() => {
       io.to(opponentSocketId).emit('call-declined');
     });
 
+    socket.on('call-ended', (data) => {
+      const { gameId } = data;
+      const game = activeGames.get(gameId);
+      if (!game) return;
+      const opponentSocketId = socket.id === game.white.socketId ? game.black.socketId : game.white.socketId;
+      io.to(opponentSocketId).emit('call-ended');
+    });
+
     // Disconnect
     socket.on('disconnect', () => {
       console.log(`Player disconnected: ${socket.id}`);
