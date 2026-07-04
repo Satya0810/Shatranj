@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import connectDB from '../../../../lib/mongodb';
-import Session from '../../../../models/Session';
-import { verifyToken, getTokenFromRequest } from '../../../../lib/auth';
+import connectDB from '../../../lib/mongodb';
+import Session from '../../../models/Session';
+import { verifyToken, getTokenFromRequest } from '../../../lib/auth';
 
 export async function GET(req) {
   try {
