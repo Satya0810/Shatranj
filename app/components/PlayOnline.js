@@ -90,6 +90,7 @@ export default function PlayOnline() {
   const [callMode, setCallMode] = useState('voice');
   const [callStatus, setCallStatus] = useState('idle'); // 'idle' | 'calling' | 'connected'
   const [incomingCall, setIncomingCall] = useState(null); // { mode }
+  const callTimeoutRef = useRef(null);
 
   // Responsive board sizing
   useEffect(() => {
@@ -747,6 +748,18 @@ export default function PlayOnline() {
     if (callStatus !== 'idle') return;
     setCallStatus('calling');
     socketRef.current.emit('call-request', { gameId, mode });
+    
+    if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
+    callTimeoutRef.current = setTimeout(() => {
+      setCallStatus((prev) => {
+        if (prev === 'calling') {
+          socketRef.current?.emit('call-ended', { gameId });
+          setTimeout(() => alert('No answer from opponent.'), 100);
+          return 'idle';
+        }
+        return prev;
+      });
+    }, 30000);
   };
 
   const handleAcceptCall = useCallback(() => {
@@ -854,6 +867,7 @@ export default function PlayOnline() {
     };
 
     const handleCallAccepted = (data) => {
+      if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
       setCallStatus('connected');
       const mode = data && data.mode ? data.mode : callMode;
       setCallMode(mode);
@@ -862,11 +876,13 @@ export default function PlayOnline() {
     };
 
     const handleCallDeclined = () => {
+      if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
       setCallStatus('idle');
       alert("Opponent declined the call.");
     };
 
     const handleCallEnded = () => {
+      if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
         peerConnectionRef.current = null;
