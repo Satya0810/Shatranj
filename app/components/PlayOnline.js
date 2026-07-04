@@ -881,67 +881,6 @@ export default function PlayOnline() {
           </div>
         </div>
 
-        {/* Draw offer notification */}
-        {drawOffered && (
-          <div className="card" style={{
-            border: '1px solid var(--accent-gold)',
-            background: 'rgba(255, 193, 7, 0.1)',
-          }}>
-            <div className="card-body" style={{ textAlign: 'center' }}>
-              <p style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-                🤝 Opponent offers a draw
-              </p>
-              <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-                <button className="btn btn-primary" onClick={handleAcceptDraw} style={{ flex: 1 }}>
-                  ✓ Accept
-                </button>
-                <button className="btn btn-secondary" onClick={handleDeclineDraw} style={{ flex: 1 }}>
-                  ✕ Decline
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Incoming Call Prompt */}
-        {incomingCall && (
-          <div className="card" style={{ border: '1px solid var(--accent-green)', background: 'rgba(129, 182, 74, 0.1)' }}>
-            <div className="card-body" style={{ textAlign: 'center' }}>
-              <p style={{ fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-                📞 Opponent wants to start a {incomingCall.mode === 'voice' ? 'Voice' : 'Video'} call
-              </p>
-              <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-                <button 
-                  className="btn btn-primary" 
-                  onClick={() => {
-                    setCallStatus('connected');
-                    socketRef.current.emit('call-accepted', { gameId });
-                    setCallMode(incomingCall.mode);
-                    if (incomingCall.mode === 'share' || incomingCall.mode === 'view') setShowVideoSection(true);
-                    initializeWebRTC(false, incomingCall.mode !== 'voice'); // Receiver is NOT initiator
-                    setIncomingCall(null);
-                  }} 
-                  style={{ flex: 1 }}
-                >
-                  ✓ Accept
-                </button>
-                <button 
-                  className="btn btn-secondary" 
-                  onClick={() => {
-                    socketRef.current.emit('call-declined', { gameId });
-                    setIncomingCall(null);
-                  }} 
-                  style={{ flex: 1 }}
-                >
-                  ✕ Decline
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Controls */}
-        <div className="card">
           <div className="card-body" style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap' }}>
             {callStatus === 'connected' ? (
               <button
@@ -1032,5 +971,6 @@ export default function PlayOnline() {
         <ProfileModal username={showProfileUsername} onClose={() => setShowProfileUsername(null)} />
       )}
     </div>
+    </>
   );
 }
