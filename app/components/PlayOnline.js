@@ -284,14 +284,8 @@ export default function PlayOnline() {
   // WebRTC Setup
   const initializeWebRTC = useCallback(async (isInitiator) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      localStreamRef.current = stream;
-      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       peerConnectionRef.current = pc;
-
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
       pc.ontrack = (event) => {
         setRemoteStream(event.streams[0]);
@@ -303,6 +297,17 @@ export default function PlayOnline() {
           socketRef.current.emit('webrtc-ice-candidate', { gameId, candidate: event.candidate });
         }
       };
+
+      // Delay camera grab for black player to prevent browser crash during local testing
+      if (!isInitiator) {
+        await new Promise(r => setTimeout(r, 1500));
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localStreamRef.current = stream;
+      if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
       if (isInitiator) {
         const offer = await pc.createOffer();
@@ -316,13 +321,16 @@ export default function PlayOnline() {
 
   useEffect(() => {
     if (phase === 'playing' && gameId && !peerConnectionRef.current) {
-      // initializeWebRTC(orientation === 'white'); // Disabled to prevent browser crashes during local testing
+      initializeWebRTC(orientation === 'white');
     }
   }, [phase, gameId, orientation, initializeWebRTC]);
 
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket || !gameId) return;
+
+    let iceQueue = [];
+    let isRemoteSet = false;
 
     const handleChat = (data) => {
       setChatMessages(prev => [...prev, data]);
@@ -331,9 +339,20 @@ export default function PlayOnline() {
       }
     };
     const handleOffer = async (data) => {
+      // Wait for local stream so we can include video in the answer
+      while (!localStreamRef.current) {
+        await new Promise(r => setTimeout(r, 200));
+      }
       const pc = peerConnectionRef.current;
       if (!pc) return;
       await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+      isRemoteSet = true;
+      
+      iceQueue.forEach(async (candidate) => {
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
+      });
+      iceQueue = [];
+
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       socket.emit('webrtc-answer', { gameId, answer });
@@ -342,11 +361,21 @@ export default function PlayOnline() {
       const pc = peerConnectionRef.current;
       if (!pc) return;
       await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+      isRemoteSet = true;
+      
+      iceQueue.forEach(async (candidate) => {
+        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
+      });
+      iceQueue = [];
     };
     const handleIce = async (data) => {
       const pc = peerConnectionRef.current;
       if (!pc) return;
-      try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch(e) { console.error(e) }
+      if (!isRemoteSet) {
+        iceQueue.push(data.candidate);
+      } else {
+        try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch(e) {}
+      }
     };
 
     socket.on('chat-message', handleChat);
