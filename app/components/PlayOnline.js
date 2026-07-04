@@ -188,17 +188,9 @@ export default function PlayOnline() {
       setBlackTime(data.blackTime);
       lastMoveTimeRef.current = Date.now();
 
-      // Update history
-      const tempGame = new Chess();
-      const newHistory = [];
-      const gameCopy = new Chess(data.fen);
-      // Rebuild history from PGN
-      const pgnMoves = gameCopy.history({ verbose: true });
-      // We can't easily get full history from just FEN, so we track it ourselves
-      setHistory(prev => {
-        const move = data.move;
-        return [...prev, move];
-      });
+      if (data.history) {
+        setHistory(data.history);
+      }
       setCurrentMoveIndex(prev => prev + 1);
     });
 

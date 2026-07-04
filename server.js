@@ -239,6 +239,7 @@ app.prepare().then(() => {
       io.to(gameId).emit('move-made', {
         move,
         fen: chess.fen(),
+        history: chess.history({ verbose: true }),
         whiteTime: game.whiteTime,
         blackTime: game.blackTime,
       });
