@@ -300,7 +300,9 @@ export default function PlayOnline() {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          sampleRate: 48000,
+          channelCount: 1
         } 
       });
       localStreamRef.current = stream;
