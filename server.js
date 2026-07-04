@@ -87,8 +87,14 @@ async function saveGameResult(gameId, game, result, reason, winner) {
 
 app.prepare().then(() => {
   const server = createServer((req, res) => {
-    const parsedUrl = parse(req.url, true);
-    handle(req, res, parsedUrl);
+    try {
+      const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+      const pathname = parsedUrl.pathname;
+      const query = Object.fromEntries(parsedUrl.searchParams.entries());
+      handle(req, res, { ...parsedUrl, pathname, query });
+    } catch (err) {
+      handle(req, res, parse(req.url, true));
+    }
   });
 
   const io = new Server(server, {

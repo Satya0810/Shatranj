@@ -43,6 +43,7 @@ export default function PlayOnline() {
   const [blackTime, setBlackTime] = useState(600000);
   const [incomingDrawOffer, setIncomingDrawOffer] = useState(false);
   const [hasSentDrawOffer, setHasSentDrawOffer] = useState(false);
+  const [drawOffersCount, setDrawOffersCount] = useState(0);
   const [searchTime, setSearchTime] = useState(0);
   const socketRef = useRef(null);
   const searchIntervalRef = useRef(null);
@@ -131,6 +132,9 @@ export default function PlayOnline() {
       lastMoveTimeRef.current = Date.now();
       setIncomingChallenge(null);
       setSentChallenge(null);
+      setDrawOffersCount(0);
+      setHasSentDrawOffer(false);
+      setIncomingDrawOffer(false);
       
       // We must register the rest of the listeners now that a game started
       registerGameListeners(socket);
@@ -287,6 +291,9 @@ export default function PlayOnline() {
       setPhase('playing');
       setIncomingChallenge(null);
       setSentChallenge(null);
+      setDrawOffersCount(0);
+      setHasSentDrawOffer(false);
+      setIncomingDrawOffer(false);
     });
 
     socket.on('game-start', (data) => {
@@ -303,6 +310,9 @@ export default function PlayOnline() {
       lastMoveTimeRef.current = Date.now();
       setIncomingChallenge(null);
       setSentChallenge(null);
+      setDrawOffersCount(0);
+      setHasSentDrawOffer(false);
+      setIncomingDrawOffer(false);
     });
 
     socket.on('move-made', (data) => {
@@ -611,10 +621,11 @@ export default function PlayOnline() {
   }, [gameId]);
 
   const handleOfferDraw = useCallback(() => {
-    if (!gameId || !socketRef.current) return;
+    if (!gameId || !socketRef.current || drawOffersCount >= 5) return;
     socketRef.current.emit('offer-draw', { gameId });
     setHasSentDrawOffer(true);
-  }, [gameId]);
+    setDrawOffersCount(prev => prev + 1);
+  }, [gameId, drawOffersCount]);
 
   const handleAcceptDraw = useCallback(() => {
     if (!gameId || !socketRef.current) return;
@@ -623,7 +634,7 @@ export default function PlayOnline() {
   }, [gameId]);
 
   // WebRTC Setup
-  const initializeWebRTC = useCallback(async (isInitiator, withVideo = true) => {
+  const initializeWebRTC = useCallback(async (isInitiator, sendVideo = true, receiveVideo = true) => {
     try {
       const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
       peerConnectionRef.current = pc;
@@ -661,7 +672,7 @@ export default function PlayOnline() {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: withVideo, 
+        video: sendVideo, 
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -710,7 +721,7 @@ export default function PlayOnline() {
         const amplifiedAudioTrack = destination.stream.getAudioTracks()[0];
         
         const tracksToSend = [amplifiedAudioTrack];
-        if (withVideo) {
+        if (sendVideo) {
           const videoTrack = stream.getVideoTracks()[0];
           if (videoTrack) tracksToSend.push(videoTrack);
         }
@@ -728,19 +739,30 @@ export default function PlayOnline() {
       }
 
       if (isInitiator) {
+        if (!sendVideo && receiveVideo) {
+          pc.addTransceiver('video', { direction: 'recvonly' });
+        } else if (sendVideo && !receiveVideo) {
+          pc.addTransceiver('video', { direction: 'sendonly' });
+        }
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         socketRef.current.emit('webrtc-offer', { gameId, offer });
       }
     } catch (err) {
       console.warn("Could not access camera/mic:", err);
+      if (window.isSecureContext === false) {
+        alert("Camera/Microphone access is blocked by your browser because the connection is not secure (HTTP). You can still receive the opponent's media.");
+      } else {
+        alert("Camera/Microphone permission was denied. Please allow access in your browser settings to share your media.");
+      }
+      
       // Fallback: create empty stream so the receiver loop breaks, allowing them to still receive video
       localStreamRef.current = new MediaStream();
       
       if (isInitiator && peerConnectionRef.current) {
         try {
           peerConnectionRef.current.addTransceiver('audio', { direction: 'recvonly' });
-          if (withVideo) {
+          if (receiveVideo) {
             peerConnectionRef.current.addTransceiver('video', { direction: 'recvonly' });
           }
           const offer = await peerConnectionRef.current.createOffer();
@@ -779,7 +801,13 @@ export default function PlayOnline() {
     setShowVideoSection(mode === 'view' || mode === 'share');
     socketRef.current.emit('call-accepted', { gameId, mode });
     setIncomingCall(null);
-    initializeWebRTC(false, mode === 'share' || mode === 'view');
+    
+    let sendVideo = false;
+    let receiveVideo = false;
+    if (mode === 'share') { sendVideo = true; receiveVideo = true; }
+    else if (mode === 'view') { sendVideo = true; receiveVideo = false; }
+    
+    initializeWebRTC(false, sendVideo, receiveVideo);
   }, [incomingCall, gameId, initializeWebRTC]);
 
   const handleDeclineCall = useCallback(() => {
@@ -881,7 +909,13 @@ export default function PlayOnline() {
       const mode = data && data.mode ? data.mode : callMode;
       setCallMode(mode);
       if (mode === 'share' || mode === 'view') setShowVideoSection(true);
-      initializeWebRTC(true, mode === 'share' || mode === 'view'); // Both view and share require two-way video transmission
+      
+      let sendVideo = false;
+      let receiveVideo = false;
+      if (mode === 'share') { sendVideo = true; receiveVideo = true; }
+      else if (mode === 'view') { sendVideo = false; receiveVideo = true; }
+      
+      initializeWebRTC(true, sendVideo, receiveVideo);
     };
 
     const handleCallDeclined = () => {
@@ -975,6 +1009,7 @@ export default function PlayOnline() {
     setGameId(null);
     setIncomingDrawOffer(false);
     setHasSentDrawOffer(false);
+    setDrawOffersCount(0);
     disconnectSocket();
     socketRef.current = null;
   }, []);
@@ -1689,11 +1724,11 @@ export default function PlayOnline() {
               <button
                 className="btn btn-secondary"
                 onClick={handleOfferDraw}
-                disabled={phase !== 'playing' || hasSentDrawOffer}
-                style={{ flex: '1 1 calc(50% - 4px)', opacity: (phase !== 'playing' || hasSentDrawOffer) ? 0.5 : 1 }}
-                title="Offer Draw"
+                disabled={phase !== 'playing' || hasSentDrawOffer || drawOffersCount >= 5}
+                style={{ flex: '1 1 calc(50% - 4px)', opacity: (phase !== 'playing' || hasSentDrawOffer || drawOffersCount >= 5) ? 0.5 : 1 }}
+                title={drawOffersCount >= 5 ? "Draw offer limit reached" : "Offer Draw"}
               >
-                🤝 Draw
+                🤝 Draw {drawOffersCount > 0 && `(${5 - drawOffersCount})`}
               </button>
             )}
             <button
