@@ -47,6 +47,17 @@ export function AuthProvider({ children }) {
       globalSocketRef.current = socket;
       socket.emit('auth', { userId: user.id, username: user.username, rating: user.rating });
 
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const { latitude, longitude } = pos.coords;
+            socket.emit('update-location', { lat: latitude, lng: longitude });
+          },
+          (err) => console.warn('Global location fetch failed or denied:', err),
+          { timeout: 10000, maximumAge: 60000 }
+        );
+      }
+
       // Listen for incoming challenges even if user is NOT on the Play Online page
       socket.on('incoming-challenge', (data) => {
         setGlobalChallenge({ ...data.challenger, type: 'nearby' });

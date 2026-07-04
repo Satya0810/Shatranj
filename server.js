@@ -17,6 +17,7 @@ const mapPlayers = new Map(); // socketId -> { socketId, userId, username, ratin
 const activeGames = new Map(); // gameId -> { chess, white, black, timeControl, whiteTime, blackTime, lastMoveTime, timerInterval }
 const onlineUsers = new Map(); // userId -> socketId
 const onlineByIp = new Map(); // ipAddress -> [ { socketId, userId, username, rating } ]
+const globalLocations = new Map(); // userId -> { lat, lng }
 
 async function saveGameResult(gameId, game, result, reason, winner) {
   if (!game.white.userId || !game.black.userId) return;
@@ -122,6 +123,56 @@ app.prepare().then(() => {
         broadcastNearbyAll(ip, socket.id);
         
         console.log(`User ${data.userId} (${data.username}) authenticated on socket ${socket.id}, IP: ${ip}`);
+
+        // Rejoin active game if disconnected
+        for (const [gameId, game] of activeGames.entries()) {
+          if (game.white.userId === data.userId || game.black.userId === data.userId) {
+            const isWhite = game.white.userId === data.userId;
+            if (isWhite) game.white.socketId = socket.id;
+            else game.black.socketId = socket.id;
+            
+            socket.join(gameId);
+            
+            const opponent = isWhite ? game.black : game.white;
+            
+            let currentWhiteTime = game.whiteTime;
+            let currentBlackTime = game.blackTime;
+            if (game.chess.turn() === 'w') currentWhiteTime -= (Date.now() - game.lastMoveTime);
+            else currentBlackTime -= (Date.now() - game.lastMoveTime);
+
+            socket.emit('rejoin-game', {
+              gameId,
+              color: isWhite ? 'white' : 'black',
+              opponent: { username: opponent.username, rating: opponent.rating, userId: opponent.userId },
+              timeControl: game.timeControl,
+              fen: game.chess.fen(),
+              history: game.chess.history({ verbose: true }),
+              whiteTime: Math.max(0, currentWhiteTime),
+              blackTime: Math.max(0, currentBlackTime),
+            });
+            console.log(`User ${data.username} rejoined game ${gameId}`);
+            break;
+          }
+        }
+      }
+    });
+
+    socket.on('update-location', (data) => {
+      if (data && data.lat && data.lng) {
+        // Find userId for this socket
+        let userId = null;
+        for (const [id, sock] of onlineUsers.entries()) {
+          if (sock === socket.id) {
+            userId = id;
+            break;
+          }
+        }
+        if (userId) {
+          globalLocations.set(userId, { lat: data.lat, lng: data.lng });
+          // If they aren't actively in mapPlayers but are on the map, this helps broadcastMapLobby
+          // It's a good idea to trigger a map broadcast here to show the newly located player to others.
+          broadcastMapLobby();
+        }
       }
     });
 
@@ -199,24 +250,34 @@ app.prepare().then(() => {
         const others = activePlayers.filter(other => other.socketId !== p.socketId);
         
         const offlineNearby = allUsers.map(u => {
-          let hash = 0;
-          const str = u._id.toString();
-          for (let i = 0; i < str.length; i++) {
-            hash = ((hash << 5) - hash) + str.charCodeAt(i);
-            hash |= 0;
-          }
-          const rand1 = Math.abs(Math.sin(hash)) * 10000 % 1;
-          const rand2 = Math.abs(Math.cos(hash)) * 10000 % 1;
-          const maxOffset = 5 / 111; // ~5km
           const socketId = onlineUsers.get(u._id.toString());
+          const storedLoc = globalLocations.get(u._id.toString());
+          
+          let lat, lng;
+          if (storedLoc) {
+            lat = storedLoc.lat;
+            lng = storedLoc.lng;
+          } else {
+            let hash = 0;
+            const str = u._id.toString();
+            for (let i = 0; i < str.length; i++) {
+              hash = ((hash << 5) - hash) + str.charCodeAt(i);
+              hash |= 0;
+            }
+            const rand1 = Math.abs(Math.sin(hash)) * 10000 % 1;
+            const rand2 = Math.abs(Math.cos(hash)) * 10000 % 1;
+            const maxOffset = 5 / 111; // ~5km
+            lat = p.lat + (rand1 - 0.5) * 2 * maxOffset;
+            lng = p.lng + (rand2 - 0.5) * 2 * maxOffset;
+          }
           
           return {
             socketId: socketId,
             userId: u._id.toString(),
             username: u.username,
             rating: u.rating,
-            lat: p.lat + (rand1 - 0.5) * 2 * maxOffset,
-            lng: p.lng + (rand2 - 0.5) * 2 * maxOffset,
+            lat,
+            lng,
             isOffline: false
           };
         });

@@ -259,10 +259,33 @@ export default function PlayOnline() {
 
   const registerGameListeners = (socket) => {
     socket.off('game-start');
+    socket.off('rejoin-game');
     socket.off('move-made');
     socket.off('game-over');
     socket.off('draw-offered');
     socket.off('draw-declined');
+
+    socket.on('rejoin-game', (data) => {
+      if (searchIntervalRef.current) clearInterval(searchIntervalRef.current);
+      setGameId(data.gameId);
+      setOrientation(data.color);
+      setOpponent(data.opponent);
+      setWhiteTime(data.whiteTime);
+      setBlackTime(data.blackTime);
+      
+      const newGame = new Chess();
+      for (const move of data.history) {
+        newGame.move(move);
+      }
+      setGame(newGame);
+      setHistory(data.history);
+      setCurrentMoveIndex(data.history.length - 1);
+      lastMoveTimeRef.current = Date.now();
+      
+      setPhase('playing');
+      setIncomingChallenge(null);
+      setSentChallenge(null);
+    });
 
     socket.on('game-start', (data) => {
       if (searchIntervalRef.current) clearInterval(searchIntervalRef.current);
@@ -705,6 +728,7 @@ export default function PlayOnline() {
     if (!incomingCall || !socketRef.current) return;
     setCallStatus('connected');
     const mode = incomingCall.mode;
+    setCallMode(mode);
     setShowVideoSection(mode === 'view' || mode === 'share');
     socketRef.current.emit('call-accepted', { gameId, mode });
     setIncomingCall(null);
@@ -805,8 +829,9 @@ export default function PlayOnline() {
     const handleCallAccepted = (data) => {
       setCallStatus('connected');
       const mode = data && data.mode ? data.mode : callMode;
+      setCallMode(mode);
       if (mode === 'share' || mode === 'view') setShowVideoSection(true);
-      initializeWebRTC(true, mode === 'share'); // Caller is initiator, only sends video if sharing
+      initializeWebRTC(true, mode === 'share' || mode === 'view'); // Both view and share require two-way video transmission
     };
 
     const handleCallDeclined = () => {
@@ -1368,25 +1393,27 @@ export default function PlayOnline() {
             <div style={{ width: '100%', aspectRatio: '4/3', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Waiting for opponent...</div>
           )}
         </div>
-        <div className="card" style={{ padding: 'var(--space-sm)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>Your Video</div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={toggleAudio} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: isAudioEnabled ? 1 : 0.5, fontSize: '14px' }} title="Toggle Audio">{isAudioEnabled ? '🎙️' : '🔇'}</button>
-              <button onClick={toggleVideo} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: isVideoEnabled ? 1 : 0.5, fontSize: '14px' }} title="Toggle Video">{isVideoEnabled ? '📹' : '🚫'}</button>
+        {callMode === 'share' && (
+          <div className="card" style={{ padding: 'var(--space-sm)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>Your Video</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={toggleAudio} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: isAudioEnabled ? 1 : 0.5, fontSize: '14px' }} title="Toggle Audio">{isAudioEnabled ? '🎙️' : '🔇'}</button>
+                <button onClick={toggleVideo} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: isVideoEnabled ? 1 : 0.5, fontSize: '14px' }} title="Toggle Video">{isVideoEnabled ? '📹' : '🚫'}</button>
+              </div>
             </div>
+            <video 
+              ref={localVideoRef} 
+              autoPlay 
+              muted 
+              playsInline 
+              style={{ width: '100%', aspectRatio: '4/3', borderRadius: 'var(--radius-md)', objectFit: 'cover', background: '#000', display: localStreamRef.current ? 'block' : 'none' }} 
+            />
+            {!localStreamRef.current && (
+              <div style={{ width: '100%', aspectRatio: '4/3', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Camera off</div>
+            )}
           </div>
-          <video 
-            ref={localVideoRef} 
-            autoPlay 
-            muted 
-            playsInline 
-            style={{ width: '100%', aspectRatio: '4/3', borderRadius: 'var(--radius-md)', objectFit: 'cover', background: '#000', display: localStreamRef.current ? 'block' : 'none' }} 
-          />
-          {!localStreamRef.current && (
-            <div style={{ width: '100%', aspectRatio: '4/3', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Camera off</div>
-          )}
-        </div>
+        )}
       </div>
 
       <div className="board-section">
