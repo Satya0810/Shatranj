@@ -13,6 +13,7 @@ const PORT = process.env.PORT || 3000;
 // In-memory lobby and game state
 const lobby = []; // { socketId, userId, username, rating }
 const activeGames = new Map(); // gameId -> { chess, white, black, timeControl, whiteTime, blackTime, lastMoveTime, timerInterval }
+const onlineUsers = new Map(); // userId -> socketId
 
 async function saveGameResult(gameId, game, result, reason, winner) {
   if (!game.white.userId || !game.black.userId) return;
@@ -96,6 +97,14 @@ app.prepare().then(() => {
 
   io.on('connection', (socket) => {
     console.log(`Player connected: ${socket.id}`);
+
+    // Register user for global chat and presence
+    socket.on('auth', (data) => {
+      if (data && data.userId) {
+        onlineUsers.set(data.userId, socket.id);
+        console.log(`User ${data.userId} authenticated on socket ${socket.id}`);
+      }
+    });
 
     // Join matchmaking lobby
     socket.on('join-lobby', (data) => {
@@ -397,10 +406,55 @@ app.prepare().then(() => {
       io.to(opponentSocketId).emit('call-ended');
     });
 
+    // Global Private Messaging
+    socket.on('private-message', async (data) => {
+      const { recipientId, message, senderId, senderName } = data;
+      try {
+        const { default: connectDB } = await import('./app/lib/mongodb.js');
+        const { default: Message } = await import('./app/models/Message.js');
+        await connectDB();
+        
+        const newMessage = await Message.create({ senderId, receiverId: recipientId, content: message });
+        
+        // Send to recipient if online
+        const recipientSocketId = onlineUsers.get(recipientId);
+        if (recipientSocketId) {
+          io.to(recipientSocketId).emit('private-message', {
+            _id: newMessage._id,
+            senderId,
+            receiverId: recipientId,
+            senderName,
+            content: message,
+            createdAt: newMessage.createdAt
+          });
+        }
+        
+        // Also echo back to sender to confirm it went through
+        socket.emit('private-message', {
+          _id: newMessage._id,
+          senderId,
+          receiverId: recipientId,
+          senderName,
+          content: message,
+          createdAt: newMessage.createdAt
+        });
+      } catch (err) {
+        console.error('Error saving private message:', err);
+      }
+    });
+
     // Disconnect
     socket.on('disconnect', () => {
       console.log(`Player disconnected: ${socket.id}`);
       
+      // Remove from onlineUsers
+      for (const [userId, sId] of onlineUsers.entries()) {
+        if (sId === socket.id) {
+          onlineUsers.delete(userId);
+          break;
+        }
+      }
+
       // Remove from lobby
       const lobbyIdx = lobby.findIndex(p => p.socketId === socket.id);
       if (lobbyIdx !== -1) lobby.splice(lobbyIdx, 1);

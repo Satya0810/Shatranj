@@ -62,6 +62,14 @@ const UserSchema = new mongoose.Schema({
   verificationOTPExpires: Date,
   resetOTP: String,
   resetOTPExpires: Date,
+  friends: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
+  friendRequests: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
 }, {
   timestamps: true,
 });

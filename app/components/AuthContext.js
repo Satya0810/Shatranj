@@ -144,7 +144,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{
-      user, token, loading,
+      user, setUser, token, loading,
       login, signup, logout, googleLogin,
       verifyOTP, forgotPassword, resetPassword,
       showAuthModal, openAuthModal, closeAuthModal,

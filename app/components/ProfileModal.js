@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from './AuthContext';
 
 export default function ProfileModal({ username, onClose }) {
-  const { user } = useAuth();
+  const { user, setUser } = useAuth();
   const isOwnProfile = user?.username === username;
   
   const [profile, setProfile] = useState(null);
@@ -16,6 +16,11 @@ export default function ProfileModal({ username, onClose }) {
   const [chesscomLinking, setChesscomLinking] = useState(false);
   const [chesscomLinkError, setChesscomLinkError] = useState('');
 
+  const [isEditingUsername, setIsEditingUsername] = useState(false);
+  const [newUsername, setNewUsername] = useState(username);
+  const [updatingUsername, setUpdatingUsername] = useState(false);
+  const [updateError, setUpdateError] = useState('');
+
   const fetchProfile = useCallback(async () => {
     try {
       const res = await fetch(`/api/users/${username}`);
@@ -24,12 +29,44 @@ export default function ProfileModal({ username, onClose }) {
       }
       const data = await res.json();
       setProfile(data);
+      setNewUsername(data.username);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
   }, [username]);
+
+  const handleUpdateUsername = async (e) => {
+    e.preventDefault();
+    if (!newUsername.trim() || newUsername.trim() === profile.username) {
+      setIsEditingUsername(false);
+      return;
+    }
+    setUpdatingUsername(true);
+    setUpdateError('');
+    try {
+      const token = localStorage.getItem('chess_token');
+      const res = await fetch('/api/users/update-username', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ newUsername: newUsername.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update username');
+      
+      setUser({ ...user, username: data.user.username });
+      setProfile({ ...profile, username: data.user.username });
+      setIsEditingUsername(false);
+    } catch (err) {
+      setUpdateError(err.message);
+    } finally {
+      setUpdatingUsername(false);
+    }
+  };
 
   const handleLinkLichess = async (e) => {
     e.preventDefault();
@@ -130,7 +167,40 @@ export default function ProfileModal({ username, onClose }) {
                   {profile.username.charAt(0).toUpperCase()}
                 </div>
               )}
-              <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 700 }}>{profile.username}</h2>
+              {isEditingUsername ? (
+                <form onSubmit={handleUpdateUsername} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="text"
+                    value={newUsername}
+                    onChange={(e) => setNewUsername(e.target.value)}
+                    className="input"
+                    style={{ textAlign: 'center', fontSize: '18px', fontWeight: 'bold', width: '200px' }}
+                    autoFocus
+                  />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={updatingUsername}>
+                      {updatingUsername ? 'Saving...' : 'Save'}
+                    </button>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setIsEditingUsername(false); setNewUsername(profile.username); }}>
+                      Cancel
+                    </button>
+                  </div>
+                  {updateError && <div style={{ color: 'var(--accent-red)', fontSize: '12px' }}>{updateError}</div>}
+                </form>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h2 style={{ margin: 0, fontSize: '24px', fontWeight: 700 }}>{profile.username}</h2>
+                  {isOwnProfile && (
+                    <button 
+                      onClick={() => setIsEditingUsername(true)}
+                      style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '16px' }}
+                      title="Edit Username"
+                    >
+                      ✎
+                    </button>
+                  )}
+                </div>
+              )}
               <div style={{ display: 'inline-block', background: 'var(--bg-surface)', padding: '4px 12px', borderRadius: 'var(--radius-full)', fontSize: '14px', fontWeight: 600, color: 'var(--accent-green)', marginTop: '8px' }}>
                 <span style={{ marginRight: '4px' }}>🏆</span> {profile.rating}
               </div>

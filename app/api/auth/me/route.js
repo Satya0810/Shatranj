@@ -17,7 +17,10 @@ export async function GET(req) {
 
     await connectDB();
 
-    const user = await User.findById(decoded.userId).select('-passwordHash');
+    const user = await User.findById(decoded.userId)
+      .select('-passwordHash')
+      .populate('friends', 'username avatar rating')
+      .populate('friendRequests', 'username avatar rating');
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
@@ -34,6 +37,8 @@ export async function GET(req) {
         draws: user.draws,
         chesscomUsername: user.chesscomUsername,
         lichessUsername: user.lichessUsername,
+        friends: user.friends,
+        friendRequests: user.friendRequests,
       }
     });
 
