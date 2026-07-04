@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect, memo } from 'react';
 import { Chessboard } from 'react-chessboard';
 import { Chess } from 'chess.js';
 
@@ -20,7 +20,7 @@ import { Chess } from 'chess.js';
  *   - boardOrientation 'white' | 'black'
  *   - animationDurationInMs (replaces animationDuration)
  */
-export default function ChessGame({
+const ChessGame = memo(function ChessGame({
   game,
   onMove,
   boardWidth = 560,
@@ -173,4 +173,6 @@ export default function ChessGame({
       <Chessboard options={boardOptions} />
     </div>
   );
-}
+});
+
+export default ChessGame;

@@ -728,6 +728,18 @@ export default function PlayOnline() {
       }
     } catch (err) {
       console.warn("Could not access camera/mic:", err);
+      // Fallback: create empty stream so the receiver loop breaks, allowing them to still receive video
+      localStreamRef.current = new MediaStream();
+      
+      if (isInitiator && peerConnectionRef.current) {
+        try {
+          const offer = await peerConnectionRef.current.createOffer();
+          await peerConnectionRef.current.setLocalDescription(offer);
+          socketRef.current.emit('webrtc-offer', { gameId, offer });
+        } catch (e) {
+          console.warn("Offer creation failed in fallback:", e);
+        }
+      }
     }
   }, [gameId]);
 
@@ -794,9 +806,11 @@ export default function PlayOnline() {
       }
     };
     const handleOffer = async (data) => {
-      // Wait for local stream so we can include video in the answer
-      while (!localStreamRef.current) {
+      // Wait for local stream so we can include video in the answer (timeout after 10s)
+      let attempts = 0;
+      while (!localStreamRef.current && attempts < 50) {
         await new Promise(r => setTimeout(r, 200));
+        attempts++;
       }
       const pc = peerConnectionRef.current;
       if (!pc) return;
@@ -1628,7 +1642,8 @@ export default function PlayOnline() {
             <button
               className="btn btn-secondary"
               onClick={handleOfferDraw}
-              style={{ flex: '1 1 calc(50% - 4px)' }}
+              disabled={phase !== 'playing' || drawOffered}
+              style={{ flex: '1 1 calc(50% - 4px)', opacity: (phase !== 'playing' || drawOffered) ? 0.5 : 1 }}
               title="Offer Draw"
             >
               🤝 Draw
@@ -1636,11 +1651,13 @@ export default function PlayOnline() {
             <button
               className="btn"
               onClick={handleResign}
+              disabled={phase !== 'playing'}
               style={{
                 flex: '1 1 calc(50% - 4px)',
                 background: 'rgba(224, 90, 90, 0.15)',
                 color: 'var(--accent-red)',
                 border: '1px solid rgba(224, 90, 90, 0.3)',
+                opacity: phase !== 'playing' ? 0.5 : 1,
               }}
               title="Resign"
             >

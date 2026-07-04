@@ -12,6 +12,7 @@ export function AuthProvider({ children }) {
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [globalChallenge, setGlobalChallenge] = useState(null); // incoming challenge from any page
   const globalSocketRef = useRef(null);
+  const blockedGlobalUsersRef = useRef([]);
 
   // Restore session on mount
   useEffect(() => {
@@ -60,10 +61,12 @@ export function AuthProvider({ children }) {
 
       // Listen for incoming challenges even if user is NOT on the Play Online page
       socket.on('incoming-challenge', (data) => {
+        if (blockedGlobalUsersRef.current.includes(data.challenger.userId)) return;
         setGlobalChallenge({ ...data.challenger, type: 'nearby' });
       });
 
       socket.on('incoming-map-challenge', (data) => {
+        if (blockedGlobalUsersRef.current.includes(data.challenger.userId)) return;
         setGlobalChallenge({ ...data.challenger, type: 'map' });
       });
     }
@@ -92,6 +95,19 @@ export function AuthProvider({ children }) {
   const declineGlobalChallenge = useCallback(() => {
     const socket = globalSocketRef.current;
     if (socket && globalChallenge) {
+      if (globalChallenge.type === 'map') {
+        socket.emit('decline-map-challenge', { challengerSocketId: globalChallenge.socketId });
+      } else {
+        socket.emit('decline-nearby-challenge', { challengerSocketId: globalChallenge.socketId });
+      }
+      setGlobalChallenge(null);
+    }
+  }, [globalChallenge]);
+
+  const blockGlobalChallengeUser = useCallback(() => {
+    const socket = globalSocketRef.current;
+    if (socket && globalChallenge) {
+      blockedGlobalUsersRef.current.push(globalChallenge.userId);
       if (globalChallenge.type === 'map') {
         socket.emit('decline-map-challenge', { challengerSocketId: globalChallenge.socketId });
       } else {
@@ -216,7 +232,7 @@ export function AuthProvider({ children }) {
       login, signup, logout, googleLogin,
       verifyOTP, forgotPassword, resetPassword,
       showAuthModal, openAuthModal, closeAuthModal,
-      globalChallenge, acceptGlobalChallenge, declineGlobalChallenge, dismissGlobalChallenge,
+      globalChallenge, acceptGlobalChallenge, declineGlobalChallenge, dismissGlobalChallenge, blockGlobalChallengeUser,
     }}>
       {children}
     </AuthContext.Provider>

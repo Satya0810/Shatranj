@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext';
 import { useRouter } from 'next/navigation';
 
 export default function GlobalChallengeNotification() {
-  const { globalChallenge, acceptGlobalChallenge, declineGlobalChallenge } = useAuth();
+  const { globalChallenge, acceptGlobalChallenge, declineGlobalChallenge, blockGlobalChallengeUser } = useAuth();
   const router = useRouter();
 
   if (!globalChallenge) return null;
@@ -65,20 +65,39 @@ export default function GlobalChallengeNotification() {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
+        <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleAccept}
+            style={{ flex: 1, fontWeight: 700, padding: '10px' }}
+          >
+            ✅ Accept
+          </button>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={declineGlobalChallenge}
+            style={{ flex: 1, padding: '10px' }}
+          >
+            ✕ Decline
+          </button>
+        </div>
         <button
-          className="btn btn-primary btn-sm"
-          onClick={handleAccept}
-          style={{ flex: 1, fontWeight: 700, padding: '10px' }}
+          onClick={blockGlobalChallengeUser}
+          style={{
+            width: '100%',
+            padding: '8px',
+            background: 'transparent',
+            border: '1px solid var(--accent-red)',
+            color: 'var(--accent-red)',
+            borderRadius: 'var(--radius-md)',
+            cursor: 'pointer',
+            fontSize: '13px',
+            transition: 'all 0.2s',
+            fontWeight: 600
+          }}
         >
-          ✅ Accept
-        </button>
-        <button
-          className="btn btn-secondary btn-sm"
-          onClick={declineGlobalChallenge}
-          style={{ flex: 1, padding: '10px' }}
-        >
-          ✕ Decline
+          🚫 Block User
         </button>
       </div>
     </div>
