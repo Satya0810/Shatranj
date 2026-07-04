@@ -987,7 +987,6 @@ export default function PlayOnline() {
       {showProfileUsername && (
         <ProfileModal username={showProfileUsername} onClose={() => setShowProfileUsername(null)} />
       )}
-    </div>
     </>
   );
 }
