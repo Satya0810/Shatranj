@@ -143,25 +143,29 @@ app.prepare().then(() => {
       const allOnIp = onlineByIp.get(ip) || [];
       const onIpIds = allOnIp.map(u => u.userId);
 
+      const onlineIds = Array.from(onlineUsers.keys());
+      const otherOnlineIds = onlineIds.filter(id => !onIpIds.includes(id));
+
       let mockUsers = [];
-      try {
-        const { default: connectDB } = await import('./app/lib/mongodb.js');
-        const { default: User } = await import('./app/models/User.js');
-        await connectDB();
-        const dbUsers = await User.find({ _id: { $nin: onIpIds } }).limit(30).lean();
-        
-        mockUsers = dbUsers.map(u => {
-          const isOnline = onlineUsers.has(u._id.toString());
-          const socketId = isOnline ? onlineUsers.get(u._id.toString()) : `offline_${u._id}`;
-          return {
-            socketId: socketId,
-            userId: u._id.toString(),
-            username: u.username,
-            rating: u.rating,
-          };
-        });
-      } catch (err) {
-        console.error('Error fetching mock nearby users:', err);
+      if (otherOnlineIds.length > 0) {
+        try {
+          const { default: connectDB } = await import('./app/lib/mongodb.js');
+          const { default: User } = await import('./app/models/User.js');
+          await connectDB();
+          const dbUsers = await User.find({ _id: { $in: otherOnlineIds } }).limit(30).lean();
+          
+          mockUsers = dbUsers.map(u => {
+            const socketId = onlineUsers.get(u._id.toString());
+            return {
+              socketId: socketId,
+              userId: u._id.toString(),
+              username: u.username,
+              rating: u.rating,
+            };
+          });
+        } catch (err) {
+          console.error('Error fetching mock nearby users:', err);
+        }
       }
 
       lobbyMembers.forEach(member => {
@@ -175,15 +179,20 @@ app.prepare().then(() => {
       const activePlayers = Array.from(mapPlayers.values());
       if (activePlayers.length === 0) return;
 
+      const activeUserIds = activePlayers.map(p => p.userId);
+      const onlineIds = Array.from(onlineUsers.keys());
+      const otherOnlineIds = onlineIds.filter(id => !activeUserIds.includes(id));
+
       let allUsers = [];
-      try {
-        const { default: connectDB } = await import('./app/lib/mongodb.js');
-        const { default: User } = await import('./app/models/User.js');
-        await connectDB();
-        const activeUserIds = activePlayers.map(p => p.userId);
-        allUsers = await User.find({ _id: { $nin: activeUserIds } }).limit(50).lean();
-      } catch (err) {
-        console.error('Error fetching users for map lobby:', err);
+      if (otherOnlineIds.length > 0) {
+        try {
+          const { default: connectDB } = await import('./app/lib/mongodb.js');
+          const { default: User } = await import('./app/models/User.js');
+          await connectDB();
+          allUsers = await User.find({ _id: { $in: otherOnlineIds } }).limit(50).lean();
+        } catch (err) {
+          console.error('Error fetching users for map lobby:', err);
+        }
       }
 
       activePlayers.forEach(p => {
@@ -199,8 +208,7 @@ app.prepare().then(() => {
           const rand1 = Math.abs(Math.sin(hash)) * 10000 % 1;
           const rand2 = Math.abs(Math.cos(hash)) * 10000 % 1;
           const maxOffset = 5 / 111; // ~5km
-          const isOnline = onlineUsers.has(u._id.toString());
-          const socketId = isOnline ? onlineUsers.get(u._id.toString()) : `offline_${u._id}`;
+          const socketId = onlineUsers.get(u._id.toString());
           
           return {
             socketId: socketId,
@@ -209,7 +217,7 @@ app.prepare().then(() => {
             rating: u.rating,
             lat: p.lat + (rand1 - 0.5) * 2 * maxOffset,
             lng: p.lng + (rand2 - 0.5) * 2 * maxOffset,
-            isOffline: !isOnline
+            isOffline: false
           };
         });
 

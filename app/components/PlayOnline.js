@@ -187,6 +187,75 @@ export default function PlayOnline() {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  const captured = useMemo(() => {
+    const pieces = game.fen().split(' ')[0];
+    const initialCounts = { p: 8, n: 2, b: 2, r: 2, q: 1, P: 8, N: 2, B: 2, R: 2, Q: 1 };
+    const currentCounts = { p: 0, n: 0, b: 0, r: 0, q: 0, P: 0, N: 0, B: 0, R: 0, Q: 0 };
+    for (const char of pieces) {
+      if (currentCounts[char] !== undefined) currentCounts[char]++;
+    }
+    
+    const whiteCaptured = {
+      p: Math.max(0, initialCounts.p - currentCounts.p),
+      n: Math.max(0, initialCounts.n - currentCounts.n),
+      b: Math.max(0, initialCounts.b - currentCounts.b),
+      r: Math.max(0, initialCounts.r - currentCounts.r),
+      q: Math.max(0, initialCounts.q - currentCounts.q),
+    };
+    
+    const blackCaptured = {
+      P: Math.max(0, initialCounts.P - currentCounts.P),
+      N: Math.max(0, initialCounts.N - currentCounts.N),
+      B: Math.max(0, initialCounts.B - currentCounts.B),
+      R: Math.max(0, initialCounts.R - currentCounts.R),
+      Q: Math.max(0, initialCounts.Q - currentCounts.Q),
+    };
+    
+    const values = { p: 1, n: 3, b: 3, r: 5, q: 9, P: 1, N: 3, B: 3, R: 5, Q: 9 };
+    let whiteScore = 0;
+    let blackScore = 0;
+    Object.keys(whiteCaptured).forEach(k => { whiteScore += whiteCaptured[k] * values[k]; });
+    Object.keys(blackCaptured).forEach(k => { blackScore += blackCaptured[k] * values[k]; });
+    
+    return {
+      whiteCaptured,
+      blackCaptured,
+      whiteAdvantage: whiteScore - blackScore,
+      blackAdvantage: blackScore - whiteScore,
+    };
+  }, [game]);
+
+  const renderCapturedPieces = (capturedDict, advantage, capturedColor) => {
+    const order = ['p', 'n', 'b', 'r', 'q'];
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', marginLeft: '8px', flexWrap: 'wrap' }}>
+        {order.map(pieceChar => {
+          const dictKey = capturedColor === 'w' ? pieceChar.toUpperCase() : pieceChar.toLowerCase();
+          const count = capturedDict[dictKey];
+          if (!count || count <= 0) return null;
+          
+          return (
+            <div key={pieceChar} style={{ display: 'flex' }}>
+              {Array.from({ length: count }).map((_, i) => (
+                <img 
+                  key={i} 
+                  src={`https://images.chesscomfiles.com/chess-themes/pieces/neo/150/${capturedColor}${pieceChar}.png`} 
+                  alt={pieceChar}
+                  style={{ width: '18px', height: '18px', marginLeft: i > 0 ? '-10px' : '2px' }}
+                />
+              ))}
+            </div>
+          );
+        })}
+        {advantage > 0 && (
+          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginLeft: '6px' }}>
+            +{advantage}
+          </span>
+        )}
+      </div>
+    );
+  };
+
   const registerGameListeners = (socket) => {
     socket.off('game-start');
     socket.off('move-made');
@@ -1324,6 +1393,11 @@ export default function PlayOnline() {
               <span style={{ fontWeight: 600 }}>{opponent?.username || 'Opponent'}</span>
               <span className="badge badge-gold" style={{ fontSize: '11px' }}>{opponent?.rating || '?'}</span>
             </div>
+            {renderCapturedPieces(
+              orientation === 'white' ? captured.blackCaptured : captured.whiteCaptured,
+              orientation === 'white' ? captured.blackAdvantage : captured.whiteAdvantage,
+              orientation === 'white' ? 'w' : 'b'
+            )}
           </div>
           <div style={{
             fontFamily: 'var(--font-mono)',
@@ -1369,6 +1443,11 @@ export default function PlayOnline() {
               <span style={{ fontWeight: 600 }}>{user?.username || 'You'}</span>
               <span className="badge badge-green" style={{ fontSize: '11px' }}>{user?.rating || '?'}</span>
             </div>
+            {renderCapturedPieces(
+              orientation === 'white' ? captured.whiteCaptured : captured.blackCaptured,
+              orientation === 'white' ? captured.whiteAdvantage : captured.blackAdvantage,
+              orientation === 'white' ? 'b' : 'w'
+            )}
           </div>
           <div style={{
             fontFamily: 'var(--font-mono)',
