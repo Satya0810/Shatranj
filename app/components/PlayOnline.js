@@ -6,6 +6,7 @@ import ChessGame from './ChessGame';
 import MoveList from './MoveList';
 import GameOverModal from './GameOverModal';
 import { useAuth } from './AuthContext';
+import { useWebRTC } from '../hooks/useWebRTC';
 import ProfileModal from './ProfileModal';
 import { useRouter } from 'next/navigation';
 import { getSocket, disconnectSocket } from '../lib/socket';
@@ -72,6 +73,38 @@ export default function PlayOnline() {
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
 
+  // WebRTC Hook Integration
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
+
+  const {
+    localStream,
+    remoteStream,
+    connectionState,
+    webrtcError,
+    initializeWebRTC,
+    handleOffer,
+    handleAnswer,
+    handleIceCandidate,
+    cleanupWebRTC
+  } = useWebRTC(socketRef, gameId);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
   useEffect(() => {
     activeTabRef.current = activeTab;
     if (activeTab === 'chat') {
@@ -79,17 +112,12 @@ export default function PlayOnline() {
     }
   }, [activeTab]);
   const [chatInput, setChatInput] = useState('');
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-  const remoteAudioRef = useRef(null);
-  const peerConnectionRef = useRef(null);
-  const localStreamRef = useRef(null);
-  const audioContextRef = useRef(null); // Reference for audio amplification context
+
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
-  const [remoteStream, setRemoteStream] = useState(null);
   const [showVideoSection, setShowVideoSection] = useState(false);
   const [callMode, setCallMode] = useState('voice');
+  const [isSendingVideo, setIsSendingVideo] = useState(false);
   const [callStatus, setCallStatus] = useState('idle'); // 'idle' | 'calling' | 'connected'
   const [incomingCall, setIncomingCall] = useState(null); // { mode }
   const callTimeoutRef = useRef(null);
@@ -144,17 +172,13 @@ export default function PlayOnline() {
 
     return () => {
       socket.off('game-start', handleGlobalGameStart);
+      if (socketRef.current) socketRef.current.emit('leave-lobby', {});
       if (searchIntervalRef.current) clearInterval(searchIntervalRef.current);
       if (clockIntervalRef.current) clearInterval(clockIntervalRef.current);
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(t => t.stop());
-      }
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-      }
+      cleanupWebRTC();
       disconnectSocket();
     };
-  }, []);
+  }, [cleanupWebRTC]);
 
   // Clock tick
   useEffect(() => {
@@ -633,147 +657,6 @@ export default function PlayOnline() {
     setIncomingDrawOffer(false);
   }, [gameId]);
 
-  // WebRTC Setup
-  const initializeWebRTC = useCallback(async (isInitiator, sendVideo = true, receiveVideo = true) => {
-    try {
-      const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-      peerConnectionRef.current = pc;
-
-      pc.ontrack = (event) => {
-        let stream = event.streams[0];
-        if (!stream) {
-          if (!remoteVideoRef.current.srcObject) {
-            remoteVideoRef.current.srcObject = new MediaStream();
-          }
-          stream = remoteVideoRef.current.srcObject;
-          stream.addTrack(event.track);
-        }
-        
-        setRemoteStream(stream);
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = stream;
-          remoteVideoRef.current.play().catch(e => console.warn('Video autoplay blocked:', e));
-        }
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = stream;
-          remoteAudioRef.current.play().catch(e => console.warn('Audio autoplay blocked:', e));
-        }
-      };
-
-      pc.onicecandidate = (event) => {
-        if (event.candidate && socketRef.current && gameId) {
-          socketRef.current.emit('webrtc-ice-candidate', { gameId, candidate: event.candidate });
-        }
-      };
-
-      // Delay camera grab for black player to prevent browser crash during local testing
-      if (!isInitiator) {
-        await new Promise(r => setTimeout(r, 1500));
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: sendVideo, 
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 48000,
-          channelCount: 1
-        } 
-      });
-
-      // Amplify the audio using Web Audio API before sending over WebRTC
-      try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        audioContextRef.current = audioCtx;
-        
-        if (audioCtx.state === 'suspended') {
-          audioCtx.resume().catch(e => console.warn('Could not resume AudioContext', e));
-        }
-        
-        const source = audioCtx.createMediaStreamSource(stream);
-        
-        // 1. High-pass filter to remove low frequency rumble/noise
-        const highpass = audioCtx.createBiquadFilter();
-        highpass.type = 'highpass';
-        highpass.frequency.value = 85; 
-        
-        // 2. Dynamics Compressor to normalize voice levels
-        const compressor = audioCtx.createDynamicsCompressor();
-        compressor.threshold.value = -40; // DB threshold to start compressing
-        compressor.knee.value = 20;
-        compressor.ratio.value = 10;
-        compressor.attack.value = 0.005;
-        compressor.release.value = 0.1;
-        
-        // 3. Gain Node for extra amplification
-        const gainNode = audioCtx.createGain();
-        gainNode.gain.value = 2.0; 
-        
-        const destination = audioCtx.createMediaStreamDestination();
-        
-        // Chain: source -> highpass -> compressor -> gain -> destination
-        source.connect(highpass);
-        highpass.connect(compressor);
-        compressor.connect(gainNode);
-        gainNode.connect(destination);
-
-        const amplifiedAudioTrack = destination.stream.getAudioTracks()[0];
-        
-        const tracksToSend = [amplifiedAudioTrack];
-        if (sendVideo) {
-          const videoTrack = stream.getVideoTracks()[0];
-          if (videoTrack) tracksToSend.push(videoTrack);
-        }
-
-        localStreamRef.current = stream;
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-
-        const streamToSend = new MediaStream(tracksToSend);
-        tracksToSend.forEach(track => pc.addTrack(track, streamToSend));
-      } catch (audioErr) {
-        console.warn("Could not amplify audio, falling back to standard:", audioErr);
-        localStreamRef.current = stream;
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
-      }
-
-      if (isInitiator) {
-        if (!sendVideo && receiveVideo) {
-          pc.addTransceiver('video', { direction: 'recvonly' });
-        } else if (sendVideo && !receiveVideo) {
-          pc.addTransceiver('video', { direction: 'sendonly' });
-        }
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socketRef.current.emit('webrtc-offer', { gameId, offer });
-      }
-    } catch (err) {
-      console.warn("Could not access camera/mic:", err);
-      if (window.isSecureContext === false) {
-        alert("Camera/Microphone access is blocked by your browser because the connection is not secure (HTTP). You can still receive the opponent's media.");
-      } else {
-        alert("Camera/Microphone permission was denied. Please allow access in your browser settings to share your media.");
-      }
-      
-      // Fallback: create empty stream so the receiver loop breaks, allowing them to still receive video
-      localStreamRef.current = new MediaStream();
-      
-      if (isInitiator && peerConnectionRef.current) {
-        try {
-          peerConnectionRef.current.addTransceiver('audio', { direction: 'recvonly' });
-          if (receiveVideo) {
-            peerConnectionRef.current.addTransceiver('video', { direction: 'recvonly' });
-          }
-          const offer = await peerConnectionRef.current.createOffer();
-          await peerConnectionRef.current.setLocalDescription(offer);
-          socketRef.current.emit('webrtc-offer', { gameId, offer });
-        } catch (e) {
-          console.warn("Offer creation failed in fallback:", e);
-        }
-      }
-    }
-  }, [gameId]);
 
   const handleStartCall = (mode) => {
     if (callStatus !== 'idle') return;
@@ -807,6 +690,7 @@ export default function PlayOnline() {
     if (mode === 'share') { sendVideo = true; receiveVideo = true; }
     else if (mode === 'view') { sendVideo = true; receiveVideo = false; }
     
+    setIsSendingVideo(sendVideo);
     initializeWebRTC(false, sendVideo, receiveVideo);
   }, [incomingCall, gameId, initializeWebRTC]);
 
@@ -845,55 +729,10 @@ export default function PlayOnline() {
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket || !gameId) return;
-
-    let iceQueue = [];
-    let isRemoteSet = false;
-
     const handleChat = (data) => {
       setChatMessages(prev => [...prev, data]);
       if (activeTabRef.current !== 'chat') {
         setHasUnreadMessages(true);
-      }
-    };
-    const handleOffer = async (data) => {
-      // Wait for local stream so we can include video in the answer (timeout after 10s)
-      let attempts = 0;
-      while (!localStreamRef.current && attempts < 50) {
-        await new Promise(r => setTimeout(r, 200));
-        attempts++;
-      }
-      const pc = peerConnectionRef.current;
-      if (!pc) return;
-      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-      isRemoteSet = true;
-      
-      iceQueue.forEach(async (candidate) => {
-        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
-      });
-      iceQueue = [];
-
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      socket.emit('webrtc-answer', { gameId, answer });
-    };
-    const handleAnswer = async (data) => {
-      const pc = peerConnectionRef.current;
-      if (!pc) return;
-      await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-      isRemoteSet = true;
-      
-      iceQueue.forEach(async (candidate) => {
-        try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
-      });
-      iceQueue = [];
-    };
-    const handleIce = async (data) => {
-      const pc = peerConnectionRef.current;
-      if (!pc) return;
-      if (!isRemoteSet) {
-        iceQueue.push(data.candidate);
-      } else {
-        try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch(e) {}
       }
     };
 
@@ -915,6 +754,7 @@ export default function PlayOnline() {
       if (mode === 'share') { sendVideo = true; receiveVideo = true; }
       else if (mode === 'view') { sendVideo = false; receiveVideo = true; }
       
+      setIsSendingVideo(sendVideo);
       initializeWebRTC(true, sendVideo, receiveVideo);
     };
 
@@ -926,27 +766,16 @@ export default function PlayOnline() {
 
     const handleCallEnded = () => {
       if (callTimeoutRef.current) clearTimeout(callTimeoutRef.current);
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-        peerConnectionRef.current = null;
-      }
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
-        localStreamRef.current = null;
-      }
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-      }
+      cleanupWebRTC();
       setCallStatus('idle');
       setShowVideoSection(false);
       alert("Opponent ended the call.");
     };
 
     socket.on('chat-message', handleChat);
-    socket.on('webrtc-offer', handleOffer);
-    socket.on('webrtc-answer', handleAnswer);
-    socket.on('webrtc-ice-candidate', handleIce);
+    socket.on('webrtc-offer', (data) => handleOffer(data.offer));
+    socket.on('webrtc-answer', (data) => handleAnswer(data.answer));
+    socket.on('webrtc-ice-candidate', (data) => handleIceCandidate(data.candidate));
     socket.on('call-request', handleCallRequest);
     socket.on('call-accepted', handleCallAccepted);
     socket.on('call-declined', handleCallDeclined);
@@ -954,19 +783,19 @@ export default function PlayOnline() {
 
     return () => {
       socket.off('chat-message', handleChat);
-      socket.off('webrtc-offer', handleOffer);
-      socket.off('webrtc-answer', handleAnswer);
-      socket.off('webrtc-ice-candidate', handleIce);
+      socket.off('webrtc-offer');
+      socket.off('webrtc-answer');
+      socket.off('webrtc-ice-candidate');
       socket.off('call-request', handleCallRequest);
       socket.off('call-accepted', handleCallAccepted);
       socket.off('call-declined', handleCallDeclined);
       socket.off('call-ended', handleCallEnded);
     };
-  }, [gameId, callStatus, callMode, initializeWebRTC]);
+  }, [gameId, callStatus, callMode, initializeWebRTC, handleOffer, handleAnswer, handleIceCandidate, cleanupWebRTC]);
 
   const toggleVideo = () => {
-    if (localStreamRef.current) {
-      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+    if (localStream) {
+      const videoTrack = localStream.getVideoTracks()[0];
       if (videoTrack) {
         videoTrack.enabled = !videoTrack.enabled;
         setIsVideoEnabled(videoTrack.enabled);
@@ -975,8 +804,8 @@ export default function PlayOnline() {
   };
 
   const toggleAudio = () => {
-    if (localStreamRef.current) {
-      const audioTrack = localStreamRef.current.getAudioTracks()[0];
+    if (localStream) {
+      const audioTrack = localStream.getAudioTracks()[0];
       if (audioTrack) {
         audioTrack.enabled = !audioTrack.enabled;
         setIsAudioEnabled(audioTrack.enabled);
@@ -1010,6 +839,7 @@ export default function PlayOnline() {
     setIncomingDrawOffer(false);
     setHasSentDrawOffer(false);
     setDrawOffersCount(0);
+    setIsSendingVideo(false);
     disconnectSocket();
     socketRef.current = null;
   }, []);
@@ -1469,6 +1299,11 @@ export default function PlayOnline() {
     <div className="play-layout" id="play-online-layout">
       {/* Video Section */}
       <div className="video-section" style={{ display: showVideoSection ? 'flex' : 'none', flexDirection: 'column', gap: 'var(--space-md)', width: '240px', flexShrink: 0 }}>
+        {webrtcError && (
+          <div style={{ padding: '8px', background: 'rgba(224, 90, 90, 0.1)', border: '1px solid var(--accent-red)', borderRadius: 'var(--radius-md)', color: 'var(--accent-red)', fontSize: '12px' }}>
+            ⚠️ {webrtcError}
+          </div>
+        )}
         <div className="card" style={{ padding: 'var(--space-sm)', position: 'relative' }}>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: 600 }}>Opponent Video</div>
           <video 
@@ -1482,7 +1317,7 @@ export default function PlayOnline() {
             <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(30,30,30,0.8)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Waiting for opponent...</div>
           )}
         </div>
-        {callMode === 'share' && (
+        {isSendingVideo && (
           <div className="card" style={{ padding: 'var(--space-sm)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>Your Video</div>
@@ -1496,9 +1331,9 @@ export default function PlayOnline() {
               autoPlay 
               muted 
               playsInline 
-              style={{ width: '100%', aspectRatio: '4/3', borderRadius: 'var(--radius-md)', objectFit: 'cover', background: '#000', display: localStreamRef.current ? 'block' : 'none' }} 
+              style={{ width: '100%', aspectRatio: '4/3', borderRadius: 'var(--radius-md)', objectFit: 'cover', background: '#000', display: localStream ? 'block' : 'none' }} 
             />
-            {!localStreamRef.current && (
+            {!localStream && (
               <div style={{ width: '100%', aspectRatio: '4/3', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>Camera off</div>
             )}
           </div>

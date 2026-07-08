@@ -24,7 +24,7 @@ export default function HistoryPage() {
     fetchGames();
   }, [token, filterPlatform, filterOpponent]);
 
-  const fetchGames = async () => {
+  async function fetchGames() {
     setLoading(true);
     try {
       const query = new URLSearchParams();

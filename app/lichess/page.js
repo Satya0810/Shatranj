@@ -24,7 +24,7 @@ function LichessDatabaseContent() {
     }
   }, [username]);
 
-  const loadUserData = async (uname) => {
+  async function loadUserData(uname) {
     setLoading(true);
     setError(null);
     setUserProfile(null);
