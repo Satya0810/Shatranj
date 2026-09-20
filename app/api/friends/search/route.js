@@ -2,9 +2,15 @@ import { NextResponse } from 'next/server';
 import connectDB from '../../../lib/mongodb';
 import User from '../../../models/User';
 import { verifyToken } from '../../../lib/auth';
+import { checkRateLimit, escapeRegex } from '../../../lib/rateLimit';
 
 export async function GET(req) {
   try {
+    const rateCheck = checkRateLimit(req, { limit: 60, windowMs: 60000, keyPrefix: 'friends_search' });
+    if (!rateCheck.allowed) {
+      return NextResponse.json({ error: 'Too many search requests' }, { status: 429 });
+    }
+
     await connectDB();
     
     // Authenticate
@@ -21,14 +27,15 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const q = searchParams.get('q');
 
-    if (!q || q.length < 2) {
+    if (!q || q.length < 2 || q.length > 50) {
       return NextResponse.json({ users: [] });
     }
 
     // Search for users, case-insensitive, limiting to 10
     // Exclude the currently logged in user
+    const safeRegex = new RegExp(escapeRegex(q.trim()), 'i');
     const users = await User.find({
-      username: { $regex: new RegExp(q, 'i') },
+      username: { $regex: safeRegex },
       _id: { $ne: decoded.userId }
     })
     .select('username rating avatar')

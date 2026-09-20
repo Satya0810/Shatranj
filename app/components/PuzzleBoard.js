@@ -15,6 +15,8 @@ export default function PuzzleBoard() {
   const [boardWidth, setBoardWidth] = useState(560);
   const [highlightSquares, setHighlightSquares] = useState({});
   const [showHint, setShowHint] = useState(false);
+  const [aiHint, setAiHint] = useState(null);
+  const [aiHintLoading, setAiHintLoading] = useState(false);
   const [theme, setTheme] = useState('mix');
   
   // List of fallback Lichess puzzle IDs to cycle through
@@ -109,6 +111,7 @@ export default function PuzzleBoard() {
         [firstMoveUci.substring(2, 4)]: { background: 'rgba(255, 255, 0, 0.3)' },
       });
       setShowHint(false);
+      setAiHint(null);
       startTimeRef.current = Date.now();
     } catch (err) {
       console.error('Error fetching puzzle:', err);
@@ -214,7 +217,31 @@ export default function PuzzleBoard() {
     setPuzzleState('playing');
     setHighlightSquares({});
     setShowHint(false);
+    setAiHint(null);
   }, [puzzle]);
+
+  const askCoachHint = async () => {
+    if (!game || !puzzle || aiHintLoading) return;
+    setAiHintLoading(true);
+    try {
+      const res = await fetch('/api/puzzle/hint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fen: game.fen(),
+          theme: puzzle.theme,
+          rating: puzzle.rating,
+          step: solutionStep
+        })
+      });
+      const data = await res.json();
+      setAiHint(data);
+    } catch (err) {
+      console.error('Failed to get AI puzzle hint:', err);
+    } finally {
+      setAiHintLoading(false);
+    }
+  };
 
   if (puzzleState === 'loading' && !puzzle) {
     return (
@@ -334,13 +361,54 @@ export default function PuzzleBoard() {
         <div className="card">
           <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-sm)' }}>
             {puzzleState === 'playing' && (
-              <button
-                className="btn btn-secondary"
-                onClick={() => setShowHint(!showHint)}
-                id="btn-hint"
-              >
-                💡 {showHint ? `Hint: Move to ${puzzle.solution[solutionStep].substring(2,4)}` : 'Show Hint'}
-              </button>
+              <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => setShowHint(!showHint)}
+                  id="btn-hint"
+                  style={{ flex: 1 }}
+                >
+                  💡 {showHint ? `Move to ${puzzle.solution[solutionStep].substring(2,4)}` : 'Show Move'}
+                </button>
+                <button
+                  className="btn btn-secondary"
+                  onClick={askCoachHint}
+                  disabled={aiHintLoading}
+                  id="btn-coach-hint"
+                  style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                >
+                  {aiHintLoading ? (
+                    <>
+                      <div className="spinner" style={{ width: '14px', height: '14px', borderWidth: '2px' }} />
+                      <span>Thinking...</span>
+                    </>
+                  ) : (
+                    <span>🤖 Ask Coach</span>
+                  )}
+                </button>
+              </div>
+            )}
+
+            {aiHint && (
+              <div style={{
+                padding: 'var(--space-md)',
+                background: 'rgba(129, 182, 74, 0.08)',
+                border: '1px solid rgba(129, 182, 74, 0.25)',
+                borderRadius: 'var(--radius-md)',
+                textAlign: 'left'
+              }}>
+                <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: 'var(--accent-green)', marginBottom: '4px' }}>
+                  💡 Coach Focus: {aiHint.theme_focus}
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--text-primary)', marginBottom: '4px' }}>
+                  {aiHint.hint}
+                </div>
+                {aiHint.encouragement && (
+                  <div style={{ fontSize: '12px', fontStyle: 'italic', color: 'var(--text-secondary)' }}>
+                    &ldquo;{aiHint.encouragement}&rdquo;
+                  </div>
+                )}
+              </div>
             )}
 
             <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>

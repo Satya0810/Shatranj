@@ -3,16 +3,30 @@ import connectDB from '../../../lib/mongodb';
 import User from '../../../models/User';
 import { comparePassword, signToken } from '../../../lib/auth';
 import Session from '../../../models/Session';
+import { checkRateLimit } from '../../../lib/rateLimit';
 
 export async function POST(req) {
   try {
+    // 1. Rate limiting: max 10 attempts per minute
+    const rateCheck = checkRateLimit(req, { limit: 10, windowMs: 60000, keyPrefix: 'auth_login' });
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: `Too many login attempts. Please try again in ${rateCheck.resetSeconds} seconds.` },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(rateCheck.resetSeconds) }
+        }
+      );
+    }
+
     await connectDB();
     
-    const { email, password } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { email, password } = body;
 
-    if (!email || !password) {
+    if (!email || !password || typeof email !== 'string' || typeof password !== 'string') {
       return NextResponse.json(
-        { error: 'Email and password are required' },
+        { error: 'Valid email and password are required' },
         { status: 400 }
       );
     }

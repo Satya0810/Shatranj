@@ -4,17 +4,32 @@ import User from '../../../models/User';
 import { hashPassword, signToken } from '../../../lib/auth';
 import { sendVerificationEmail } from '../../../lib/mailer';
 import Session from '../../../models/Session';
+import { checkRateLimit } from '../../../lib/rateLimit';
 
 export async function POST(req) {
   try {
+    // 1. Rate limiting: max 5 signups per minute per IP
+    const rateCheck = checkRateLimit(req, { limit: 5, windowMs: 60000, keyPrefix: 'auth_signup' });
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: `Too many accounts created from this IP. Please try again in ${rateCheck.resetSeconds} seconds.` },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(rateCheck.resetSeconds) }
+        }
+      );
+    }
+
     await connectDB();
     
-    const { username, email, password } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { username, email, password } = body;
 
     // Validation
-    if (!username || !email || !password) {
+    if (!username || !email || !password || 
+        typeof username !== 'string' || typeof email !== 'string' || typeof password !== 'string') {
       return NextResponse.json(
-        { error: 'Username, email, and password are required' },
+        { error: 'Valid username, email, and password are required' },
         { status: 400 }
       );
     }

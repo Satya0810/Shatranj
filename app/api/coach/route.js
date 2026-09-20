@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { chatCompletion, parseJsonResponse } from '../../lib/llm';
+import { checkRateLimit } from '../../lib/rateLimit';
 
 // The system prompt provided by the user
 const COACH_SYSTEM_PROMPT = `You are an expert chess coach and analyst with deep knowledge of chess theory, tactics, strategy, and endgames. You have the ability to explain complex chess concepts in simple, encouraging language suited to players of all levels.
@@ -47,7 +49,16 @@ CRITICAL RULES:
 
 export async function POST(req) {
   try {
-    const body = await req.json();
+    // 1. Rate limiting: max 30 coach requests per minute
+    const rateCheck = checkRateLimit(req, { limit: 30, windowMs: 60000, keyPrefix: 'ai_coach' });
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: `Coach service rate limit exceeded. Please wait ${rateCheck.resetSeconds} seconds.` },
+        { status: 429, headers: { 'Retry-After': String(rateCheck.resetSeconds) } }
+      );
+    }
+
+    const body = await req.json().catch(() => ({}));
     const { 
       fen, 
       moveNumber = 1, 
@@ -63,8 +74,8 @@ export async function POST(req) {
       positionBreakdown
     } = body;
 
-    if (!fen) {
-      return NextResponse.json({ error: 'FEN is required' }, { status: 400 });
+    if (!fen || typeof fen !== 'string' || fen.length > 120) {
+      return NextResponse.json({ error: 'Valid FEN is required (max 120 characters)' }, { status: 400 });
     }
 
     // 1. Fetch from chess-api.com (Stockfish 18) - ONLY if client didn't provide sfData
@@ -175,81 +186,22 @@ export async function POST(req) {
       inputData.position_breakdown = positionBreakdown;
     }
 
-    // Now, call the free LLM API (OpenRouter)
-    const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-    
-    let llmResponse;
-    let retries = 3;
-    let delay = 10000; // wait 10 seconds before retrying
-    
-    while (retries > 0) {
-      llmResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-          'HTTP-Referer': 'http://localhost:3000',
-          'X-Title': 'ChessMaster Coach',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: 'meta-llama/llama-3.3-70b-instruct:free', // Reverted to the smarter 70B model
-          messages: [
-            { role: 'system', content: COACH_SYSTEM_PROMPT },
-            { role: 'user', content: JSON.stringify(inputData, null, 2) }
-          ],
-          response_format: { type: 'json_object' },
-          temperature: 0.7
-        })
+    // Call LLM API (llm7.io with OpenRouter fallback)
+    let parsedFeedback = null;
+    try {
+      const llmResult = await chatCompletion({
+        messages: [
+          { role: 'system', content: COACH_SYSTEM_PROMPT },
+          { role: 'user', content: JSON.stringify(inputData, null, 2) }
+        ],
+        responseFormat: { type: 'json_object' },
+        temperature: 0.7
       });
-      
-      if (llmResponse.status === 429) {
-        retries--;
-        if (retries === 0) break;
-        console.warn(`OpenRouter rate limited (429). Retrying in ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        delay += 2000; // increase wait time
-      } else {
-        break;
-      }
-    }
 
-    const llmText = await llmResponse.text();
-    console.log('LLM Text:', llmText);
-    
-    let parsedFeedback = {};
-    
-    // 1. If it's a JSON object wrapper (e.g. OpenAI format), extract the inner string
-    let responseString = llmText;
-    try {
-      const wrapper = JSON.parse(llmText);
-      if (wrapper.choices && wrapper.choices[0] && wrapper.choices[0].message && wrapper.choices[0].message.content) {
-        responseString = wrapper.choices[0].message.content;
-      } else if (wrapper.message && wrapper.message.content) {
-        responseString = wrapper.message.content;
-      } else if (wrapper.content) {
-        responseString = wrapper.content;
-      }
-    } catch (e) {
-      // It's not a JSON wrapper, just raw text. That's fine.
-    }
-
-    // 2. Try to parse the inner string. If it fails, extract the JSON block.
-    try {
-      // Clean markdown code blocks if present
-      let cleanString = responseString.replace(/```json/g, '').replace(/```/g, '').trim();
-      parsedFeedback = JSON.parse(cleanString);
-    } catch (e) {
-      // Fallback: use regex to extract the first JSON-like object
-      const jsonMatch = responseString.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          parsedFeedback = JSON.parse(jsonMatch[0]);
-        } catch (e2) {
-          parsedFeedback = { parsing_error: 'LLM did not return valid JSON inside the object', raw_output: responseString };
-        }
-      } else {
-        parsedFeedback = { parsing_error: 'LLM did not return any JSON object', raw_output: responseString };
-      }
+      console.log('LLM Raw Output:', llmResult.content);
+      parsedFeedback = parseJsonResponse(llmResult.content);
+    } catch (llmErr) {
+      console.warn('Coach LLM call failed:', llmErr.message);
     }
 
     // Fallback if LLM failed to return the correct structure

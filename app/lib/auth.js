@@ -3,15 +3,19 @@ import bcrypt from 'bcryptjs';
 import connectDB from './mongodb';
 import Session from '../models/Session';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_key_dev';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('FATAL: JWT_SECRET environment variable is not defined in production!');
+}
+const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev_fallback_secret_chessmaster_key_do_not_use_in_prod';
 
 export function signToken(userId, sessionId) {
-  return jwt.sign({ userId, jti: sessionId }, JWT_SECRET, { expiresIn: '30d' });
+  return jwt.sign({ userId, jti: sessionId }, EFFECTIVE_JWT_SECRET, { expiresIn: '30d' });
 }
 
 export async function verifyToken(token) {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, EFFECTIVE_JWT_SECRET);
     if (!decoded || !decoded.jti) return null;
     
     await connectDB();

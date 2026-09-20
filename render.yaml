@@ -13,3 +13,7 @@ services:
         sync: false
       - key: OPENROUTER_API_KEY
         sync: false
+      - key: LLM7_API_KEY
+        sync: false
+      - key: LLM7_MODEL
+        sync: false
